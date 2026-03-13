@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Usage:
-#   bash run_uvm.sh [UVM_TESTNAME] [SEED]
+#   bash run_uvm.sh [UVM_TESTNAME] [SEED] [EXTRA_PLUSARGS]
 # Notes:
 #   The argument is a UVM test class name, not a top-level file name.
 #   The simulation top is fixed to tb_uvm_top from the filelist.
@@ -10,9 +10,13 @@ set -euo pipefail
 
 TEST_NAME=${1:-i2c_smoke_test}
 SEED_ARG=${2:-}
-CDIR=$(pwd)
+EXTRA_PLUSARGS=${3:-}
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SIM_DIR=$(cd "${SCRIPT_DIR}/.." && pwd)
+RESULT_BASE="${SIM_DIR}/sim_result"
+FILELIST="${SCRIPT_DIR}/uvm_filelist.f"
 
-RESULT_ROOT="$CDIR/../sim_result/${TEST_NAME}"
+RESULT_ROOT="$RESULT_BASE/${TEST_NAME}"
 WAVE_DIR="$RESULT_ROOT/wave"
 LOG_DIR="$RESULT_ROOT/log"
 MISC_DIR="$RESULT_ROOT/misc"
@@ -44,7 +48,7 @@ VCS_CMD=(
   -full64
   -sverilog
   -ntb_opts uvm-1.2
-  -f ../../work/uvm_filelist.f
+  -f ${FILELIST}
   -top tb_uvm_top
   +UVM_TESTNAME=${TEST_NAME}
   ${SEED_OPT}
@@ -55,6 +59,12 @@ VCS_CMD=(
   -l ${LOG_DIR}/${TEST_NAME}.log
   -o simv
 )
+
+if [[ -n "${EXTRA_PLUSARGS}" ]]; then
+  # shellcheck disable=SC2206
+  EXTRA_ARR=( ${EXTRA_PLUSARGS} )
+  VCS_CMD+=("${EXTRA_ARR[@]}")
+fi
 
 if [[ -n "${VERDI_HOME:-}" ]] && [[ -f "${VERDI_HOME}/share/PLI/VCS/LINUX64/novas.tab" ]]; then
   VCS_CMD+=(
@@ -72,10 +82,186 @@ if [[ -d "${COV_DIR}/${TEST_NAME}.cm.vdb" ]]; then
   urg -dir "${COV_DIR}/${TEST_NAME}.cm.vdb" -report "${MISC_DIR}/Cov_Report"
 fi
 
+# Merge all test coverage DBs into one consolidated report under sim_result
+MERGE_REPORT_DIR="${RESULT_BASE}/Cov_Report_All"
+MERGE_LIST_FILE="${RESULT_BASE}/merged_cov_inputs.txt"
+find "${RESULT_BASE}" -type d -name "*.cm.vdb" | sort > "${MERGE_LIST_FILE}"
+
+if [[ -s "${MERGE_LIST_FILE}" ]]; then
+  URG_MERGE_CMD=(urg)
+  while IFS= read -r vdb; do
+    URG_MERGE_CMD+=(-dir "${vdb}")
+  done < "${MERGE_LIST_FILE}"
+  URG_MERGE_CMD+=(-report "${MERGE_REPORT_DIR}")
+  "${URG_MERGE_CMD[@]}"
+fi
+
+LOG_FILE="${LOG_DIR}/${TEST_NAME}.log"
+RUN_TAG="$(date +%Y%m%d_%H%M%S)"
+LOG_ARCHIVE="${LOG_DIR}/${TEST_NAME}_${SEED}_${RUN_TAG}.log"
+cp "${LOG_FILE}" "${LOG_ARCHIVE}"
+
+UVM_ERR_CNT=$(grep -cE '^UVM_ERROR .*\[[^]]+\]' "${LOG_FILE}" || true)
+UVM_FATAL_CNT=$(grep -cE '^UVM_FATAL .*\[[^]]+\]' "${LOG_FILE}" || true)
+UVM_WARN_CNT=$(grep -cE '^UVM_WARNING .*\[[^]]+\]' "${LOG_FILE}" || true)
+
+if [[ "${UVM_ERR_CNT}" -eq 0 && "${UVM_FATAL_CNT}" -eq 0 ]]; then
+  RUN_STATUS="PASS"
+else
+  RUN_STATUS="FAIL"
+fi
+
+FUNC_COV="N/A"
+FCOV_VAL=$(sed -nE 's/.*functional_coverage=([0-9]+(\.[0-9]+)?)%.*/\1/p' "${LOG_FILE}" | tail -n 1)
+if [[ -n "${FCOV_VAL}" ]]; then
+  FUNC_COV="${FCOV_VAL}"
+fi
+
+# Parse bucket-hit line from scoreboard and persist as coverage report CSV
+BUCKET_DB="${RESULT_BASE}/coverage_buckets.csv"
+if [[ ! -f "${BUCKET_DB}" ]]; then
+  echo "timestamp,test,seed,addr_low,addr_mid,addr_high,len_single,len_short,len_burst,illegal_read" > "${BUCKET_DB}"
+fi
+
+addr_low=0
+addr_mid=0
+addr_high=0
+len_single=0
+len_short=0
+len_burst=0
+illegal_read=0
+
+bucket_line=$(grep "\[SCB_BUCKET\]" "${LOG_FILE}" | tail -n 1 || true)
+if [[ -n "${bucket_line}" ]]; then
+  addr_low=$(echo "${bucket_line}" | sed -nE 's/.*addr_low=([0-9]+).*/\1/p')
+  addr_mid=$(echo "${bucket_line}" | sed -nE 's/.*addr_mid=([0-9]+).*/\1/p')
+  addr_high=$(echo "${bucket_line}" | sed -nE 's/.*addr_high=([0-9]+).*/\1/p')
+  len_single=$(echo "${bucket_line}" | sed -nE 's/.*len_single=([0-9]+).*/\1/p')
+  len_short=$(echo "${bucket_line}" | sed -nE 's/.*len_short=([0-9]+).*/\1/p')
+  len_burst=$(echo "${bucket_line}" | sed -nE 's/.*len_burst=([0-9]+).*/\1/p')
+  illegal_read=$(echo "${bucket_line}" | sed -nE 's/.*illegal_read=([0-9]+).*/\1/p')
+fi
+
+echo "$(date '+%F %T'),${TEST_NAME},${SEED},${addr_low:-0},${addr_mid:-0},${addr_high:-0},${len_single:-0},${len_short:-0},${len_burst:-0},${illegal_read:-0}" >> "${BUCKET_DB}"
+
+RUN_DB="${RESULT_BASE}/regression_runs.csv"
+if [[ ! -f "${RUN_DB}" ]]; then
+  echo "timestamp,test,seed,mode,status,uvm_error,uvm_fatal,uvm_warning,func_cov,log" > "${RUN_DB}"
+fi
+echo "$(date '+%F %T'),${TEST_NAME},${SEED},${SEED_MODE},${RUN_STATUS},${UVM_ERR_CNT},${UVM_FATAL_CNT},${UVM_WARN_CNT},${FUNC_COV},${LOG_ARCHIVE}" >> "${RUN_DB}"
+
+FAIL_DB="${RESULT_BASE}/failure_events.csv"
+if [[ ! -f "${FAIL_DB}" ]]; then
+  echo "timestamp,test,seed,id,count" > "${FAIL_DB}"
+fi
+if [[ "${RUN_STATUS}" == "FAIL" ]]; then
+  grep "UVM_ERROR" "${LOG_FILE}" | sed -n 's/.*\[\([^]]*\)\].*/\1/p' | sort | uniq -c | while read -r cnt id; do
+    echo "$(date '+%F %T'),${TEST_NAME},${SEED},${id},${cnt}" >> "${FAIL_DB}"
+  done
+fi
+
+DASHBOARD_FILE="${RESULT_BASE}/regression_dashboard.md"
+TOTAL_RUNS=$(awk -F, 'NR>1{c++} END{print c+0}' "${RUN_DB}")
+PASS_RUNS=$(awk -F, 'NR>1&&$5=="PASS"{c++} END{print c+0}' "${RUN_DB}")
+FAIL_RUNS=$(awk -F, 'NR>1&&$5=="FAIL"{c++} END{print c+0}' "${RUN_DB}")
+
+if [[ "${TOTAL_RUNS}" -gt 0 ]]; then
+  PASS_RATE=$(awk -v p="${PASS_RUNS}" -v t="${TOTAL_RUNS}" 'BEGIN{printf "%.2f", (p*100.0)/t}')
+else
+  PASS_RATE="0.00"
+fi
+
+CODE_COV_HINT="${MERGE_REPORT_DIR}"
+
+{
+  echo "# UVM Regression Dashboard"
+  echo
+  echo "- Total runs: ${TOTAL_RUNS}"
+  echo "- Passed runs: ${PASS_RUNS}"
+  echo "- Failed runs: ${FAIL_RUNS}"
+  echo "- Pass rate: ${PASS_RATE}%"
+  echo "- Merged code coverage report: ${CODE_COV_HINT}"
+  echo
+  echo "## Test Pass Rate"
+  echo
+  echo "| test | runs | pass | fail | pass_rate | latest_seed | latest_func_cov |"
+  echo "|---|---:|---:|---:|---:|---:|---:|"
+  awk -F, '
+    NR>1{
+      test=$2; runs[test]++; if($5=="PASS") pass[test]++; else fail[test]++;
+      seed[test]=$3; fcov[test]=$9;
+    }
+    END{
+      for (t in runs) {
+        pr=(runs[t]>0)?(pass[t]*100.0/runs[t]):0.0;
+        printf "| %s | %d | %d | %d | %.2f%% | %s | %s |\n", t, runs[t], pass[t]+0, fail[t]+0, pr, seed[t], fcov[t];
+      }
+    }' "${RUN_DB}" | sort
+  echo
+  echo "## Failure Distribution (by error ID)"
+  echo
+  if [[ -f "${FAIL_DB}" ]]; then
+    echo "| error_id | count |"
+    echo "|---|---:|"
+    awk -F, 'NR>1{cnt[$4]+=$5} END{for (id in cnt) printf "| %s | %d |\n", id, cnt[id]}' "${FAIL_DB}" | sort -t'|' -k3,3nr
+  else
+    echo "No failure records yet."
+  fi
+  echo
+  echo "## Missing Scenarios"
+  echo
+  echo "| scenario | mapped_test | status | note |"
+  echo "|---|---|---|---|"
+  for pair in \
+    "basic read/write loop:i2c_smoke_test" \
+    "illegal address NACK:i2c_illegal_addr_test" \
+    "clock low stretch timing:i2c_stretch_test" \
+    "random burst read/write:i2c_rand_burst_test"; do
+    scenario=${pair%%:*}
+    tname=${pair##*:}
+    tpass=$(awk -F, -v t="${tname}" 'NR>1&&$2==t&&$5=="PASS"{c++} END{print c+0}' "${RUN_DB}")
+    if [[ "${tpass}" -gt 0 ]]; then
+      echo "| ${scenario} | ${tname} | ✅ covered | at least one PASS |"
+    else
+      echo "| ${scenario} | ${tname} | ❌ missing | no PASS record yet, prioritize this test |"
+    fi
+  done
+  echo
+  echo "## Functional Coverage Trend (latest 20 runs)"
+  echo
+  echo "| timestamp | test | seed | status | func_cov(%) |"
+  echo "|---|---|---:|---|---:|"
+  tail -n +2 "${RUN_DB}" | tail -n 20 | awk -F, '{printf "| %s | %s | %s | %s | %s |\n", $1, $2, $3, $5, $9}'
+  echo
+  echo "## Functional Coverage Average by Test"
+  echo
+  echo "| test | valid_cov_samples | avg_func_cov(%) | latest_func_cov(%) |"
+  echo "|---|---:|---:|---:|"
+  awk -F, '
+    NR>1{
+      t=$2;
+      latest[t]=$9;
+      if ($9!="N/A") {
+        sum[t]+=$9;
+        cnt[t]++;
+      }
+    }
+    END{
+      for (t in latest) {
+        avg=(cnt[t]>0)?(sum[t]/cnt[t]):0.0;
+        printf "| %s | %d | %.2f | %s |\n", t, cnt[t]+0, avg, latest[t];
+      }
+    }' "${RUN_DB}" | sort
+} > "${DASHBOARD_FILE}"
+
 echo "[DONE] UVM test=${TEST_NAME}"
 echo "       top : tb_uvm_top"
 echo "       seed: ${SEED_INFO}"
 echo "       seed_file: ${SEED_FILE}"
 echo "       log : ${LOG_DIR}/${TEST_NAME}.log"
 echo "       cov : ${MISC_DIR}/Cov_Report"
+echo "       cov_merged: ${MERGE_REPORT_DIR}"
+echo "       cov_inputs: ${MERGE_LIST_FILE}"
+echo "       cov_buckets: ${BUCKET_DB}"
+echo "       dashboard: ${DASHBOARD_FILE}"
 echo "       fsdb: ${WAVE_DIR}/${TEST_NAME}.fsdb (if enabled)"
