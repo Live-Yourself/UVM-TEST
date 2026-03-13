@@ -1,3 +1,474 @@
+# SystemVerilog 与 UVM 验证实践要点（基于本工程）
+
+> 面向 I2C Slave 验证场景整理。重点覆盖：SystemVerilog 常用语法、UVM 类体系、工厂机制、phase 机制、TLM 连接与 `config_db` 配置传递。
+
+---
+
+## 1. SystemVerilog 变量与数据结构
+
+### 1.1 常用变量类型
+
+| 类型 | 典型场景 | 说明 |
+|---|---|---|
+| `bit` / `logic` | 接口信号、临时标志 | `bit` 为二值（0/1）；`logic` 为四值（0/1/X/Z），接口与 RTL 连接建议优先 `logic` |
+| `int` / `integer` | 计数器、配置参数 | `int`：32 位有符号；`integer`：四值有符号（旧代码常见）；验证中地址/长度常用 `int unsigned` |
+| `byte` / `shortint` / `longint` | 数据缓存 | 分别 8/16/64 位，按需选位宽可节省内存 |
+| `real` / `shortreal` | 模拟参数 | 实数建模使用，纯数字逻辑验证较少 |
+| `string` | 日志、路径名 | `uvm_info` 消息、`uvm_config_db` 路径、文件路径 |
+| `enum` | 状态机、操作类型 | 可读性高，适合 opcode/state（如 `IDLE/START/DATA/STOP`） |
+| 队列 / 动态数组 / 关联数组 | 数据收集与模型存储 | 队列适合流式缓存；动态数组适合可变长度 payload；关联数组适合稀疏/键值映射模型 |
+
+### 1.2 典型声明示例
+
+#### 枚举定义
+```systemverilog
+typedef enum {I2C_WRITE, I2C_READ} i2c_op_e;
+```
+
+参数/语义说明：
+- `typedef`：类型定义关键字，为枚举类型创建别名。
+- `enum`：定义命名常量集合，提升可读性与可维护性。
+- `I2C_WRITE, I2C_READ`：枚举成员，默认从 `0` 递增。
+- `i2c_op_e`：枚举类型名，`_e` 是常见命名后缀。
+
+#### 非随机动态数组
+```systemverilog
+bit [7:0] rdata[];
+```
+
+参数/语义说明：
+- `bit [7:0]`：元素类型为 8 位二值数据。
+- `rdata[]`：动态数组，长度运行时分配。
+- 未加 `rand`：不参与随机化，常用于保存 DUT 返回数据。
+
+#### 队列
+```systemverilog
+bit ack_bits[$];
+```
+
+参数/语义说明：
+- `bit`：队列元素类型。
+- `[$]`：队列大小可动态变化。
+- 典型用途：记录每个 byte 对应的 ACK/NACK 位。
+
+#### 关联数组
+```systemverilog
+byte unsigned model_mem[byte unsigned];
+```
+
+参数/语义说明：
+- 左侧 `byte unsigned`：值类型（存储的内容）。
+- `model_mem`：数组名。
+- 右侧 `[byte unsigned]`：索引类型（键类型）。
+- 适合做寄存器/存储器参考模型（稀疏地址空间友好）。
+
+常用方法：
+- `array.size()`
+- `array.delete([key])`
+- `array.exists(key)`
+- `array.first(key)` / `array.last(key)`
+- `foreach(array[key]) ...`
+
+---
+
+## 2. UVM 类体系与职责划分
+
+### 2.1 类别总览
+
+| 类别 | 典型基类 | 核心职责 | 工程实践建议 |
+|---|---|---|---|
+| Transaction（事务） | `uvm_sequence_item` | 封装一次传输的数据字段与约束 | 实现 `copy/compare/convert2string`，必要时实现 `pack/unpack` |
+| Sequence（序列） | `uvm_sequence` | 组织和生成激励流 | 在 `body()` 中构造场景，可复用、可嵌套 |
+| Driver（驱动） | `uvm_driver #(T)` | 事务级到引脚级转换 | 在 `run_phase()` 中执行握手、时序驱动 |
+| Monitor（监视） | `uvm_monitor` | 引脚级到事务级采样重建 | 通过 analysis 端口广播给 scoreboard/coverage |
+| Sequencer（序列器） | `uvm_sequencer #(T)` | 调度 sequence 与 driver 握手 | 管理事务发放与仲裁 |
+| Agent（代理） | `uvm_agent` | 封装 `sqr+drv+mon` | 支持 active/passive，可配置复用 |
+| Scoreboard（记分板） | `uvm_scoreboard` | 预期/实测比对 | 建议使用队列或关联数组做参考模型 |
+| Env（环境） | `uvm_env` | 集成多个 agent 与检查组件 | 在 `connect_phase` 完成 TLM 连线 |
+| Test（测试） | `uvm_test` | 顶层场景控制 | 构建环境、下发配置、启动 sequence |
+| Config（配置对象） | `uvm_object` | 参数集中管理 | 通过 `uvm_config_db` 分发给下层组件 |
+
+### 2.2 继承示例
+
+```systemverilog
+class i2c_item extends uvm_sequence_item;
+```
+
+语句解释：
+- `class`：定义类。
+- `i2c_item`：事务类名，表示一次 I2C 传输抽象。
+- `extends`：继承关键字。
+- `uvm_sequence_item`：UVM 事务基类，提供随机化、打印、比较等基础能力。
+
+```systemverilog
+class i2c_sequencer extends uvm_sequencer #(i2c_item);
+class i2c_driver    extends uvm_driver    #(i2c_item);
+```
+
+语句解释：
+- `#(i2c_item)`：参数化类型，指定 sequencer/driver 处理的事务类型。
+- `uvm_sequencer #(i2c_item)`：调度并向 driver 发放 `i2c_item`。
+- `uvm_driver #(i2c_item)`：从 sequencer 获取 `i2c_item` 后驱动到引脚时序。
+
+---
+
+## 3. `new` 与对象创建方式
+
+| 用法 | 语法 | 说明 |
+|---|---|---|
+| 直接构造对象 | `obj = new();` / `obj = new("name");` | 不经过工厂，不能 type override |
+| 动态数组创建 | `arr = new[size];` | 元素按类型默认值初始化 |
+| 动态数组复制 | `arr2 = new[n](arr1);` | 新数组可与旧数组长度不同 |
+| 随机化 | `assert(obj.randomize());` | 先 `new` 再随机化 |
+| 工厂创建（推荐） | `T::type_id::create("name", parent)` | 支持 override 与统一管理 |
+
+> 说明：在 UVM 环境中，组件与事务对象优先使用工厂创建。
+
+---
+
+## 4. UVM 工厂机制（Factory）
+
+### 4.1 注册宏选择
+
+| 宏 | 用于 | 示例 |
+|---|---|---|
+| `` `uvm_object_utils(T)`` | 非参数化 `uvm_object` 派生类 | item、cfg、sequence |
+| `` `uvm_component_utils(T)`` | 非参数化 `uvm_component` 派生类 | driver、monitor、agent、env、test |
+| `` `uvm_object_param_utils(T)`` | 参数化 object | `packet #(DWIDTH)` |
+| `` `uvm_component_param_utils(T)`` | 参数化 component | `agent #(CFG_T)` |
+
+自动字段宏（`*_utils_begin/end`）可减少样板代码，但有性能成本，建议按需使用。
+
+### 4.2 构造函数模板
+
+#### 对象
+```systemverilog
+class i2c_item extends uvm_sequence_item;
+  `uvm_object_utils(i2c_item)
+
+  function new(string name = "i2c_item");
+    super.new(name);
+  endfunction
+endclass
+```
+
+关键说明：
+- 对象类构造函数通常为 `new(string name = "...")`。
+- `super.new(name)` 用于初始化父类对象信息。
+- 对象类无 `parent`，不参与 UVM 组件层次树。
+
+#### 组件
+```systemverilog
+class i2c_sequencer extends uvm_sequencer #(i2c_item);
+  `uvm_component_utils(i2c_sequencer)
+
+  function new(string name, uvm_component parent);
+    super.new(name, parent);
+  endfunction
+endclass
+```
+
+关键说明：
+- 组件类构造函数必须带 `parent`：`new(string name, uvm_component parent)`。
+- `super.new(name, parent)` 建立组件层次关系。
+- 组件存在于拓扑中，受 phase 机制统一调度。
+
+### 4.3 工厂创建示例
+
+```systemverilog
+cfg = i2c_cfg::type_id::create("cfg");          // object：不需要 parent
+env = i2c_env::type_id::create("env", this);    // component：需要 parent
+```
+
+---
+
+## 5. UVM Phase 机制（重点）
+
+### 5.1 `build_phase(uvm_phase phase)`
+- 作用：创建组件/对象、读取配置（零时间）。
+- 类型：`function`。
+- 典型内容：
+  - `type_id::create(...)`
+  - `uvm_config_db::get(...)`
+
+### 5.2 `connect_phase(uvm_phase phase)`
+- 作用：连接 TLM 端口（零时间）。
+- 类型：`function`。
+- 典型内容：
+  - `drv.seq_item_port.connect(sqr.seq_item_export);`
+  - `mon.ap.connect(scb.imp);`
+
+### 5.3 `run_phase(uvm_phase phase)`
+- 作用：执行有时间行为（驱动、采样、等待）。
+- 类型：`task`。
+- 典型内容：
+  - `forever` 循环
+  - `@(...)` / `#...` 时序行为
+  - `phase.raise_objection(this)` / `phase.drop_objection(this)`
+
+### 5.4 重写构建阶段（示例）
+
+```systemverilog
+function void build_phase(uvm_phase phase);
+  super.build_phase(phase);
+  cfg.scl_low_extra = 300;
+endfunction
+```
+
+说明：
+- 先调用 `super.build_phase(phase)`，保证父类构建流程完整执行。
+- 再覆盖/细化配置参数（如 `cfg.scl_low_extra`）。
+- 在 `build_phase` 中修改配置，可确保在后续连接与运行前生效。
+
+---
+
+## 6. 常用操作符与语法速查
+
+### 6.1 比较与集合判断
+
+| 符号/语法 | 作用 | 示例 |
+|---|---|---|
+| `===` / `!==` | 四态严格比较（含 X/Z） | `1'bz === 1'bz` |
+| `==?` / `!=?` | 通配比较（右侧 X/Z 视为通配） | `a ==? 4'b1x0x` |
+| `inside` | 集合成员判断 | `x inside {[1:10],20}` |
+
+### 6.2 位操作、拼接与数据重排
+
+| 符号/语法 | 作用 | 示例 |
+|---|---|---|
+| `<<` / `<<<` | 逻辑左移 / 算术左移 | `a << 2`, `sa <<< 2` |
+| `{}` / `{{}}` | 拼接 / 复制拼接 | `{a,b}`, `{4{a}}` |
+| `{<<{}}` / `{>>{}}` | 流式打包/解包 | `{<<8{data}}` |
+| `'1` / `'0` / `'x` | 填充值 | `logic [7:0] a='1;` |
+
+### 6.3 赋值与自增
+
+| 符号/语法 | 作用 | 示例 |
+|---|---|---|
+| `++` | 自增 | `i++`, `++i` |
+| `+=` / `-=` / `*=` / `%=` / `^=` | 复合赋值 | `a += b`, `a ^= b` |
+
+### 6.4 作用域与面向对象相关
+
+| 符号/语法 | 作用 | 示例 |
+|---|---|---|
+| `::` | 作用域解析 | `cls::var` |
+| `->` | 类句柄成员访问 | `p->data` |
+| `virtual` | 虚方法/虚接口 | `virtual task ...`, `virtual i2c_if vif;` |
+| `typedef` | 类型别名 | `typedef logic [7:0] byte_t;` |
+
+### 6.5 过程块关键字
+
+| 符号/语法 | 作用 | 示例 |
+|---|---|---|
+| `always_comb` | 组合逻辑过程块 | 自动敏感列表 |
+| `always_latch` | 锁存逻辑过程块 | `always_latch begin ... end` |
+| `always_ff` | 时序逻辑过程块 | `@(posedge clk)` |
+
+### 6.6 常见系统函数
+
+| 符号/语法 | 作用 | 示例 |
+|---|---|---|
+| <code>&#36;sformatf</code> | 格式化字符串 | <code>&#36;sformatf("v=%0d", v)</code> |
+| <code>&#36;random</code> | 有符号随机数 | <code>val = &#36;random();</code> |
+| <code>&#36;clog2</code> | 向上取整对数 | <code>int w = &#36;clog2(depth);</code> |
+
+---
+
+## 7. UVM 常用 API 速查
+
+| 类别 | 方法/宏 | 说明 |
+|---|---|---|
+| 对象创建 | `type_id::create` / `new` | 工厂创建 / 直接创建 |
+| 配置管理 | `uvm_config_db::set/get` | 跨层传参 |
+| 报告机制 | `` `uvm_info / `uvm_warning / `uvm_error / `uvm_fatal`` | 日志与错误处理 |
+| 相位 | `build_phase/connect_phase/run_phase` | 生命周期入口 |
+| objection | `raise_objection/drop_objection` | 控制测试结束时机 |
+| 序列驱动握手 | `get_next_item/item_done` | sequencer-driver 通道 |
+| 事务工具 | `copy/compare/print/convert2string` | 调试与比对 |
+| 随机化 | `randomize` | 约束随机激励 |
+
+### 报告宏默认行为
+
+| 宏 | 默认 verbosity | 是否终止仿真 |
+|---|---|---|
+| `` `uvm_fatal`` | `UVM_NONE` | 是 |
+| `` `uvm_error`` | `UVM_NONE` | 否 |
+| `` `uvm_warning`` | `UVM_MEDIUM` | 否 |
+| `` `uvm_info`` | `UVM_MEDIUM` | 否 |
+
+---
+
+## 8. TLM 连接模型：Analysis 与 Seq-Drv 握手
+
+### 8.1 Analysis 广播（发布/订阅）
+
+- 端口类型：`uvm_analysis_port` / `uvm_analysis_imp`
+- 回调约定：`write(T t)`
+- 典型链路：`monitor(or driver) -> scoreboard/coverage`
+
+关键关系：
+1. 发布端定义：`uvm_analysis_port #(i2c_item) ap;`
+2. 订阅端定义：`uvm_analysis_imp #(i2c_item, i2c_scoreboard) imp;`
+3. 拓扑连接：`agent.drv.ap.connect(scb.imp);`
+4. 发布事务：`ap.write(tr);`（框架回调到订阅者 `write()`）
+
+关键语句解释：
+- `uvm_analysis_port #(i2c_item) ap;`：声明广播发布端。
+- `uvm_analysis_imp #(i2c_item, i2c_scoreboard) imp;`：声明订阅入口，回调到 `i2c_scoreboard::write()`。
+- `agent.drv.ap.connect(scb.imp);`：把发布端和接收端连通。
+- `ap.write(tr);`：发布事务给所有订阅者（1 对多）。
+
+### 8.2 Sequencer-Driver 事务握手
+
+- 端口类型：`seq_item_port` / `seq_item_export`
+- 关键方法：
+  - `seq_item_port.get_next_item(req);`
+  - `seq_item_port.item_done();`
+
+连接语句：
+```systemverilog
+drv.seq_item_port.connect(sqr.seq_item_export);
+```
+
+未连接时，`get_next_item()` 无法正常取到事务，导致仿真异常或停滞。
+
+关键语句解释：
+- `seq_item_port.get_next_item(req)`：driver 阻塞等待 sequencer 发下一个事务。
+- `seq_item_port.item_done()`：通知 sequencer 当前事务处理完成。
+- `drv.seq_item_port.connect(sqr.seq_item_export)`：建立 sequencer → driver 握手通道。
+
+---
+
+## 9. `uvm_config_db` 配置传递机制
+
+### 9.1 配置下发（set）
+
+```systemverilog
+uvm_config_db#(i2c_cfg)::set(this, "env.agent*", "cfg", cfg);
+```
+
+含义：
+- 类型为 `i2c_cfg`
+- 从 `this` 作用域发布
+- 路径匹配 `env.agent*`
+- 键名 `cfg`
+- 值为配置对象 `cfg`
+
+参数解释（`set(cntxt, inst_name, field_name, value)`）：
+- `this`：发布配置的起始上下文。
+- `"env.agent*"`：目标实例路径（支持通配符 `*`）。
+- `"cfg"`：配置键名。
+- `cfg`：实际下发的配置对象。
+
+### 9.2 配置读取（get）
+
+```systemverilog
+if (!uvm_config_db#(virtual i2c_if)::get(this, "", "vif", vif))
+  `uvm_fatal("NOVIF", "vif not set")
+```
+
+说明：
+- 获取 `virtual i2c_if` 类型的虚接口
+- 键名为 `vif`
+- 未取到则 `uvm_fatal` 终止仿真
+
+参数解释（`get(cntxt, inst_name, field_name, value_out)`）：
+- `this`：当前组件上下文（谁来取）。
+- `""`：实例名不过滤（在当前可见范围内查找）。
+- `"vif"`：要读取的键名。
+- `vif`：输出变量（取到后写入该句柄）。
+
+---
+
+## 10. Driver 骨架（推荐模板）
+
+```systemverilog
+class i2c_driver extends uvm_driver #(i2c_item);
+  `uvm_component_utils(i2c_driver)
+
+  virtual i2c_if vif;
+  i2c_cfg cfg;
+  uvm_analysis_port #(i2c_item) ap;
+
+  function new(string name, uvm_component parent);
+    super.new(name, parent);
+    ap = new("ap", this);
+  endfunction
+
+  function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    if (!uvm_config_db#(virtual i2c_if)::get(this, "", "vif", vif))
+      `uvm_fatal("NOVIF", "vif not set")
+    if (!uvm_config_db#(i2c_cfg)::get(this, "", "cfg", cfg)) begin
+      cfg = i2c_cfg::type_id::create("cfg");
+      `uvm_warning("NOCFG", "cfg not set, use default")
+    end
+  endfunction
+
+  task run_phase(uvm_phase phase);
+    i2c_item tr;
+    vif.init_bus();
+
+    forever begin
+      seq_item_port.get_next_item(tr);
+      `uvm_info("DRV", $sformatf("Drive: %s", tr.convert2string()), UVM_MEDIUM)
+      case (tr.op)
+        I2C_WRITE: do_write(tr);
+        I2C_READ : do_read(tr);
+      endcase
+      ap.write(tr);
+      seq_item_port.item_done();
+    end
+  endtask
+endclass
+```
+
+关键语句逐行说明：
+- `virtual i2c_if vif;`：类里保存虚接口句柄，不能直接例化 interface 实体。
+- `uvm_analysis_port #(i2c_item) ap;`：用于把 driver 事务广播给 scoreboard/coverage。
+- `ap = new("ap", this);`：在构造函数中创建 analysis 端口。
+- `super.build_phase(phase);`：先执行父类构建逻辑。
+- `uvm_config_db::get(..."vif", vif)`：从配置库提取虚接口。
+- `` `uvm_fatal("NOVIF", ...)``：接口缺失时立即终止，避免空句柄驱动。
+- `uvm_config_db::get(..."cfg", cfg)`：读取配置对象；缺失时创建默认配置并告警。
+- `seq_item_port.get_next_item(tr);`：获取待驱动事务。
+- `` `uvm_info("DRV", $sformatf(...), UVM_MEDIUM)``：打印调试日志。
+- `case (tr.op)`：按事务操作类型选择写/读驱动流程。
+- `ap.write(tr);`：把“已执行事务”发送到分析通道。
+- `seq_item_port.item_done();`：完成握手，允许发下一个事务。
+
+`uvm_info` 详细级别补充：
+- 常见等级：`UVM_NONE / UVM_LOW / UVM_MEDIUM / UVM_HIGH / UVM_FULL / UVM_DEBUG`。
+- 建议默认使用 `UVM_MEDIUM`，调试难题时临时提升 verbosity。
+
+---
+
+## 11. 易错点与检查清单
+
+- `build_phase()` 忘记 `super.build_phase(phase)`。
+- `driver` 未拿到 `vif` 却继续仿真。
+- `seq_item_port` 与 `seq_item_export` 未连接。
+- `item_done()` 漏调用导致 sequence 卡死。
+- object/component 的 `new()` 形参写错：
+  - object：`new(string name="...")`
+  - component：`new(string name, uvm_component parent)`
+- 组件类与对象类注册宏混用。
+
+---
+
+## 12. 建议阅读顺序（给初学者）
+
+1. 第 2 章：先建立 UVM 组件分工概念。  
+2. 第 5 章：理解 phase 何时做什么。  
+3. 第 8 章：吃透两类核心连接（analysis、seq-drv）。  
+4. 第 9~10 章：按模板落地到工程代码。  
+5. 第 11 章：对照清单逐项排查。
+
+---
+
+如需下一步，我可以继续把该文档按“面试问答版”再整理一版（每个知识点配 1 个典型追问和标准回答）。
+<!-- 下面是旧版草稿内容，已归档，不再作为主文档阅读
 [TOC](目录)
 ## 变量
 | 变量类型  |  典型场景  |  说明及实例  |
@@ -616,3 +1087,4 @@ endclass
     - `UVM_MEDIUM`：中等详细程度（默认）
 
   此外还有UVM_NONE（关键错误）、UVM_LOW（低详细程度）、UVM_HIGH（高详细程度）、UVM_FULL（最高详细程度）、UVM_DEBUG（调试级别）
+-->
