@@ -55,6 +55,25 @@ class i2c_illegal_addr_seq extends i2c_base_seq;
   endtask
 endclass
 
+class i2c_illegal_read_seq extends i2c_base_seq;
+  `uvm_object_utils(i2c_illegal_read_seq)
+
+  function new(string name = "i2c_illegal_read_seq");
+    super.new(name);
+  endfunction
+
+  virtual task body();
+    i2c_item tr;
+    tr = i2c_item::type_id::create("tr");
+    start_item(tr);
+    tr.op       = I2C_READ;
+    tr.dev_addr = 7'h55;
+    tr.reg_addr = 8'h20;
+    tr.rd_len   = 1;
+    finish_item(tr);
+  endtask
+endclass
+
 class i2c_clock_stretch_seq extends i2c_base_seq;
   `uvm_object_utils(i2c_clock_stretch_seq)
 
@@ -93,9 +112,44 @@ class i2c_rand_burst_seq extends i2c_base_seq;
   virtual task body();
     i2c_item wr;
     i2c_item rd;
+    uvm_cmdline_processor clp;
+    string arg_val;
+    int blen;
+    bit [7:0] reg_lo;
+    bit [7:0] reg_hi;
+    int unsigned eff_burst_len;
+
+    clp = uvm_cmdline_processor::get_inst();
+    reg_lo = 8'h00;
+    reg_hi = 8'hF0;
 
     if (!randomize())
       `uvm_fatal("SEQ", "randomize burst seq failed")
+
+    // Must set after randomize(); otherwise burst_len may be uninitialized.
+    eff_burst_len = burst_len;
+
+    if (clp.get_arg_value("+BURST_LEN=", arg_val)) begin
+      blen = arg_val.atoi();
+      if (blen >= 1 && blen <= 16)
+        eff_burst_len = blen;
+    end
+
+    if (clp.get_arg_value("+ADDR_BUCKET=", arg_val)) begin
+      if ((arg_val == "LOW") || (arg_val == "low")) begin
+        reg_lo = 8'h00;
+        reg_hi = 8'h3F;
+      end else if ((arg_val == "MID") || (arg_val == "mid")) begin
+        reg_lo = 8'h40;
+        reg_hi = 8'hBF;
+      end else if ((arg_val == "HIGH") || (arg_val == "high")) begin
+        reg_lo = 8'hC0;
+        reg_hi = 8'hF0;
+      end
+    end
+
+    if (!std::randomize(start_reg) with { start_reg inside {[reg_lo:reg_hi]}; })
+      `uvm_fatal("SEQ", "randomize start_reg failed")
 
     wr = i2c_item::type_id::create("wr");
     start_item(wr);
@@ -103,7 +157,7 @@ class i2c_rand_burst_seq extends i2c_base_seq;
       op == I2C_WRITE;
       dev_addr == 7'h42;
       reg_addr == start_reg;
-      wdata.size() == burst_len;
+      wdata.size() == eff_burst_len;
     }) begin
       `uvm_fatal("SEQ", "randomize write item failed")
     end
@@ -116,7 +170,7 @@ class i2c_rand_burst_seq extends i2c_base_seq;
       dev_addr == 7'h42;
       reg_addr == start_reg;
       wdata.size() == 0;
-      rd_len == burst_len;
+      rd_len == eff_burst_len;
     }) begin
       `uvm_fatal("SEQ", "randomize read item failed")
     end

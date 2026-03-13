@@ -50,6 +50,23 @@ class i2c_illegal_addr_test extends i2c_base_test;
   endtask
 endclass
 
+class i2c_illegal_read_test extends i2c_base_test;
+  `uvm_component_utils(i2c_illegal_read_test)
+
+  function new(string name, uvm_component parent);
+    super.new(name, parent);
+  endfunction
+
+  task run_phase(uvm_phase phase);
+    i2c_illegal_read_seq seq;
+    phase.raise_objection(this);
+    seq = i2c_illegal_read_seq::type_id::create("seq");
+    seq.start(env.agent.sqr);
+    #1000ns;
+    phase.drop_objection(this);
+  endtask
+endclass
+
 class i2c_stretch_test extends i2c_base_test;
   `uvm_component_utils(i2c_stretch_test)
 
