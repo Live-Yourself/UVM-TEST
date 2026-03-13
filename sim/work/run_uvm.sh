@@ -6,7 +6,7 @@ set -euo pipefail
 # Notes:
 #   The argument is a UVM test class name, not a top-level file name.
 #   The simulation top is fixed to tb_uvm_top from the filelist.
-#   SEED is optional; when omitted, script uses automatic random seed.
+#   SEED is optional; when omitted, script auto-generates a seed and records it.
 
 TEST_NAME=${1:-i2c_smoke_test}
 SEED_ARG=${2:-}
@@ -22,12 +22,22 @@ mkdir -p "$WAVE_DIR" "$LOG_DIR" "$MISC_DIR" "$COV_DIR"
 cd "$MISC_DIR"
 
 if [[ -n "$SEED_ARG" ]]; then
-  SEED_OPT="+ntb_random_seed=${SEED_ARG}"
-  SEED_INFO="fixed(${SEED_ARG})"
+  SEED="$SEED_ARG"
+  SEED_MODE="fixed"
 else
-  SEED_OPT="+ntb_random_seed_automatic"
-  SEED_INFO="automatic"
+  # Generate a per-run seed in [1, 2147483646]
+  NS=$(date +%s%N)
+  SEED=$(( (NS % 2147483646) + 1 ))
+  SEED_MODE="auto"
 fi
+
+SEED_OPT="+ntb_random_seed=${SEED}"
+SEED_INFO="${SEED_MODE}(${SEED})"
+SEED_FILE="${LOG_DIR}/${TEST_NAME}.seed"
+SEED_HIST_FILE="${LOG_DIR}/seed_history.log"
+
+echo "${SEED}" > "${SEED_FILE}"
+echo "$(date '+%F %T') test=${TEST_NAME} mode=${SEED_MODE} seed=${SEED}" >> "${SEED_HIST_FILE}"
 
 VCS_CMD=(
   vcs
@@ -65,6 +75,7 @@ fi
 echo "[DONE] UVM test=${TEST_NAME}"
 echo "       top : tb_uvm_top"
 echo "       seed: ${SEED_INFO}"
+echo "       seed_file: ${SEED_FILE}"
 echo "       log : ${LOG_DIR}/${TEST_NAME}.log"
 echo "       cov : ${MISC_DIR}/Cov_Report"
 echo "       fsdb: ${WAVE_DIR}/${TEST_NAME}.fsdb (if enabled)"
