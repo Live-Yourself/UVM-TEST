@@ -1,4 +1,4 @@
-﻿+incdir+../uvm/if
++incdir+../uvm/if
 +incdir+../uvm/item
 +incdir+../uvm/seq
 +incdir+../uvm/agent

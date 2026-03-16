@@ -89,6 +89,26 @@ class BucketStat:
         self.illegal_read += int(row.get("illegal_read", "0") or 0)
 
 
+class Bucket2Stat:
+    def __init__(self):
+        self.legal_wr = 0
+        self.legal_rd = 0
+        self.illegal_wr = 0
+        self.illegal_rd = 0
+        self.ack_all = 0
+        self.ack_nack = 0
+        self.rd_match = 0
+
+    def merge_row(self, row):
+        self.legal_wr += int(row.get("legal_wr", "0") or 0)
+        self.legal_rd += int(row.get("legal_rd", "0") or 0)
+        self.illegal_wr += int(row.get("illegal_wr", "0") or 0)
+        self.illegal_rd += int(row.get("illegal_rd", "0") or 0)
+        self.ack_all += int(row.get("ack_all", "0") or 0)
+        self.ack_nack += int(row.get("ack_nack", "0") or 0)
+        self.rd_match += int(row.get("rd_match", "0") or 0)
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Generate next regression plan from history.")
     p.add_argument("--result-base", default=None, help="Path to sim/sim_result (optional)")
@@ -166,7 +186,19 @@ def load_bucket_stats(bucket_db):
     return b
 
 
-def build_plan(stats, bucket, args):
+def load_bucket2_stats(bucket2_db):
+    b = Bucket2Stat()
+    if not os.path.exists(bucket2_db):
+        return b
+
+    with open(bucket2_db, "r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            b.merge_row(row)
+    return b
+
+
+def build_plan(stats, bucket, bucket2, args):
     plan = []
 
     # Ensure core scenario coverage first
@@ -219,9 +251,45 @@ def build_plan(stats, bucket, args):
         for _ in range(3):
             plan.append(PlanItem(98, "i2c_illegal_read_test", seed_gen(), "", "unhit bucket: illegal address read path"))
 
+    # v2 bucket-driven closures
+    if bucket2.legal_wr == 0:
+        for _ in range(2):
+            plan.append(PlanItem(96, "i2c_smoke_test", seed_gen(), "", "unhit bucket: legal write path"))
+    if bucket2.legal_rd == 0:
+        for _ in range(2):
+            plan.append(PlanItem(96, "i2c_smoke_test", seed_gen(), "", "unhit bucket: legal read path"))
+    if bucket2.illegal_wr == 0:
+        for _ in range(2):
+            plan.append(PlanItem(96, "i2c_illegal_addr_test", seed_gen(), "", "unhit bucket: illegal write path"))
+    if bucket2.illegal_rd == 0:
+        for _ in range(2):
+            plan.append(PlanItem(96, "i2c_illegal_read_test", seed_gen(), "", "unhit bucket: illegal read path"))
+    if bucket2.ack_nack == 0:
+        for _ in range(2):
+            plan.append(PlanItem(94, "i2c_illegal_addr_test", seed_gen(), "", "unhit bucket: NACK path"))
+    if bucket2.rd_match == 0:
+        for _ in range(2):
+            plan.append(PlanItem(94, "i2c_rand_burst_test", seed_gen(), "+BURST_LEN=3", "unhit bucket: read data match path"))
+
+    # Deterministic matrix: avoid blind same-pattern retries
+    # Cover address(low/mid/high) x len(1/3/8) by construction.
+    matrix = [
+        ("LOW", 1), ("LOW", 3), ("LOW", 8),
+        ("MID", 1), ("MID", 3), ("MID", 8),
+        ("HIGH", 1), ("HIGH", 3), ("HIGH", 8),
+    ]
+    for addr, blen in matrix:
+        reason = "targeted matrix run: addr={} len={}".format(addr, blen)
+        plan.append(PlanItem(88, "i2c_rand_burst_test", seed_gen(), "+ADDR_BUCKET={} +BURST_LEN={}".format(addr, blen), reason))
+
     # De-duplicate and cap
-    plan.sort(key=lambda x: (x.priority, x.test), reverse=True)
-    return plan[: args.max_plan_items]
+    dedup = {}
+    for p in plan:
+        key = (p.test, p.extra_args, p.reason)
+        if key not in dedup or p.priority > dedup[key].priority:
+            dedup[key] = p
+    plan = sorted(dedup.values(), key=lambda x: (x.priority, x.test), reverse=True)
+    return plan[:args.max_plan_items]
 
 
 def write_outputs(result_base, work_dir, plan, stats, fail_top, bucket):
@@ -321,11 +389,13 @@ def main():
     run_db = os.path.join(result_base, "regression_runs.csv")
     fail_db = os.path.join(result_base, "failure_events.csv")
     bucket_db = os.path.join(result_base, "coverage_buckets.csv")
+    bucket2_db = os.path.join(result_base, "coverage_buckets_v2.csv")
 
     stats = load_stats(run_db)
     fail_top = load_failure_top(fail_db)
     bucket = load_bucket_stats(bucket_db)
-    plan = build_plan(stats, bucket, args)
+    bucket2 = load_bucket2_stats(bucket2_db)
+    plan = build_plan(stats, bucket, bucket2, args)
     write_outputs(result_base, script_dir, plan, stats, fail_top, bucket)
 
     print("[AUTO_PLAN] generated:")

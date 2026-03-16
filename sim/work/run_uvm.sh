@@ -14,7 +14,7 @@ EXTRA_PLUSARGS=${3:-}
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SIM_DIR=$(cd "${SCRIPT_DIR}/.." && pwd)
 RESULT_BASE="${SIM_DIR}/sim_result"
-FILELIST="${SCRIPT_DIR}/uvm_filelist.f"
+FILELIST="${SCRIPT_DIR}/filelist.f"
 
 RESULT_ROOT="$RESULT_BASE/${TEST_NAME}"
 WAVE_DIR="$RESULT_ROOT/wave"
@@ -34,6 +34,16 @@ else
   SEED=$(( (NS % 2147483646) + 1 ))
   SEED_MODE="auto"
 fi
+
+RUN_TAG="$(date +%Y%m%d_%H%M%S)"
+COV_RUN_NAME="${TEST_NAME}_${SEED}_${RUN_TAG}"
+COV_RUN_DIR="${COV_DIR}/${COV_RUN_NAME}.cm"
+LOG_FILE="${LOG_DIR}/${COV_RUN_NAME}.log"
+LATEST_LOG="${LOG_DIR}/${TEST_NAME}.log"
+
+# Optional DUT-only code/toggle collection (set env: COV_SCOPE=dut)
+COV_SCOPE="${COV_SCOPE:-all}"
+COV_SCOPE_INFO="all"
 
 SEED_OPT="+ntb_random_seed=${SEED}"
 SEED_INFO="${SEED_MODE}(${SEED})"
@@ -55,10 +65,17 @@ VCS_CMD=(
   -timescale=1ns/1ps
   -debug_access+all -kdb -lca
   -cm line+cond+fsm+tgl+branch
-  -cm_dir ${COV_DIR}/${TEST_NAME}.cm
-  -l ${LOG_DIR}/${TEST_NAME}.log
+  -cm_dir ${COV_RUN_DIR}
+  -l ${LOG_FILE}
   -o simv
 )
+
+if [[ "${COV_SCOPE}" == "dut" ]]; then
+  CM_HIER_TMP="${MISC_DIR}/cm_hier_dut_${RUN_TAG}.cfg"
+  echo "+tree tb_uvm_top.dut" > "${CM_HIER_TMP}"
+  VCS_CMD+=( -cm_hier "${CM_HIER_TMP}" )
+  COV_SCOPE_INFO="dut"
+fi
 
 if [[ -n "${EXTRA_PLUSARGS}" ]]; then
   # shellcheck disable=SC2206
@@ -78,8 +95,11 @@ fi
 
 "${VCS_CMD[@]}" -R
 
-if [[ -d "${COV_DIR}/${TEST_NAME}.cm.vdb" ]]; then
-  urg -dir "${COV_DIR}/${TEST_NAME}.cm.vdb" -report "${MISC_DIR}/Cov_Report"
+cp "${LOG_FILE}" "${LATEST_LOG}"
+
+if [[ -d "${COV_RUN_DIR}.vdb" ]]; then
+  urg -dir "${COV_RUN_DIR}.vdb" -report "${MISC_DIR}/Cov_Report_${COV_RUN_NAME}" || \
+    echo "[WARN] urg single-run report failed for ${COV_RUN_DIR}.vdb"
 fi
 
 # Merge all test coverage DBs into one consolidated report under sim_result
@@ -93,13 +113,10 @@ if [[ -s "${MERGE_LIST_FILE}" ]]; then
     URG_MERGE_CMD+=(-dir "${vdb}")
   done < "${MERGE_LIST_FILE}"
   URG_MERGE_CMD+=(-report "${MERGE_REPORT_DIR}")
-  "${URG_MERGE_CMD[@]}"
+  "${URG_MERGE_CMD[@]}" || echo "[WARN] urg merged report failed"
 fi
 
-LOG_FILE="${LOG_DIR}/${TEST_NAME}.log"
-RUN_TAG="$(date +%Y%m%d_%H%M%S)"
-LOG_ARCHIVE="${LOG_DIR}/${TEST_NAME}_${SEED}_${RUN_TAG}.log"
-cp "${LOG_FILE}" "${LOG_ARCHIVE}"
+LOG_ARCHIVE="${LOG_FILE}"
 
 UVM_ERR_CNT=$(grep -cE '^UVM_ERROR .*\[[^]]+\]' "${LOG_FILE}" || true)
 UVM_FATAL_CNT=$(grep -cE '^UVM_FATAL .*\[[^]]+\]' "${LOG_FILE}" || true)
@@ -115,6 +132,18 @@ FUNC_COV="N/A"
 FCOV_VAL=$(sed -nE 's/.*functional_coverage=([0-9]+(\.[0-9]+)?)%.*/\1/p' "${LOG_FILE}" | tail -n 1)
 if [[ -n "${FCOV_VAL}" ]]; then
   FUNC_COV="${FCOV_VAL}"
+fi
+
+FUNC_COV_SAMPLES="0"
+FCOV_SAMPLES_VAL=$(sed -nE 's/.*functional_coverage=[0-9]+(\.[0-9]+)?% samples=([0-9]+).*/\2/p' "${LOG_FILE}" | tail -n 1)
+if [[ -n "${FCOV_SAMPLES_VAL}" ]]; then
+  FUNC_COV_SAMPLES="${FCOV_SAMPLES_VAL}"
+fi
+
+FCOV_MIN_SAMPLES="${FCOV_MIN_SAMPLES:-1}"
+if [[ "${FUNC_COV_SAMPLES}" =~ ^[0-9]+$ ]] && [[ "${FUNC_COV_SAMPLES}" -lt "${FCOV_MIN_SAMPLES}" ]]; then
+  RUN_STATUS="FAIL"
+  echo "[WARN] FCOV samples=${FUNC_COV_SAMPLES} < FCOV_MIN_SAMPLES=${FCOV_MIN_SAMPLES}, mark run as FAIL"
 fi
 
 # Parse bucket-hit line from scoreboard and persist as coverage report CSV
@@ -144,11 +173,37 @@ fi
 
 echo "$(date '+%F %T'),${TEST_NAME},${SEED},${addr_low:-0},${addr_mid:-0},${addr_high:-0},${len_single:-0},${len_short:-0},${len_burst:-0},${illegal_read:-0}" >> "${BUCKET_DB}"
 
+BUCKET2_DB="${RESULT_BASE}/coverage_buckets_v2.csv"
+if [[ ! -f "${BUCKET2_DB}" ]]; then
+  echo "timestamp,test,seed,legal_wr,legal_rd,illegal_wr,illegal_rd,ack_all,ack_nack,rd_match" > "${BUCKET2_DB}"
+fi
+
+legal_wr=0
+legal_rd=0
+illegal_wr=0
+illegal_rd=0
+ack_all=0
+ack_nack=0
+rd_match=0
+
+bucket2_line=$(grep "\[SCB_BUCKET2\]" "${LOG_FILE}" | tail -n 1 || true)
+if [[ -n "${bucket2_line}" ]]; then
+  legal_wr=$(echo "${bucket2_line}" | sed -nE 's/.*legal_wr=([0-9]+).*/\1/p')
+  legal_rd=$(echo "${bucket2_line}" | sed -nE 's/.*legal_rd=([0-9]+).*/\1/p')
+  illegal_wr=$(echo "${bucket2_line}" | sed -nE 's/.*illegal_wr=([0-9]+).*/\1/p')
+  illegal_rd=$(echo "${bucket2_line}" | sed -nE 's/.*illegal_rd=([0-9]+).*/\1/p')
+  ack_all=$(echo "${bucket2_line}" | sed -nE 's/.*ack_all=([0-9]+).*/\1/p')
+  ack_nack=$(echo "${bucket2_line}" | sed -nE 's/.*ack_nack=([0-9]+).*/\1/p')
+  rd_match=$(echo "${bucket2_line}" | sed -nE 's/.*rd_match=([0-9]+).*/\1/p')
+fi
+
+echo "$(date '+%F %T'),${TEST_NAME},${SEED},${legal_wr:-0},${legal_rd:-0},${illegal_wr:-0},${illegal_rd:-0},${ack_all:-0},${ack_nack:-0},${rd_match:-0}" >> "${BUCKET2_DB}"
+
 RUN_DB="${RESULT_BASE}/regression_runs.csv"
 if [[ ! -f "${RUN_DB}" ]]; then
-  echo "timestamp,test,seed,mode,status,uvm_error,uvm_fatal,uvm_warning,func_cov,log" > "${RUN_DB}"
+  echo "timestamp,test,seed,mode,status,uvm_error,uvm_fatal,uvm_warning,func_cov,func_cov_samples,log" > "${RUN_DB}"
 fi
-echo "$(date '+%F %T'),${TEST_NAME},${SEED},${SEED_MODE},${RUN_STATUS},${UVM_ERR_CNT},${UVM_FATAL_CNT},${UVM_WARN_CNT},${FUNC_COV},${LOG_ARCHIVE}" >> "${RUN_DB}"
+echo "$(date '+%F %T'),${TEST_NAME},${SEED},${SEED_MODE},${RUN_STATUS},${UVM_ERR_CNT},${UVM_FATAL_CNT},${UVM_WARN_CNT},${FUNC_COV},${FUNC_COV_SAMPLES},${LOG_ARCHIVE}" >> "${RUN_DB}"
 
 FAIL_DB="${RESULT_BASE}/failure_events.csv"
 if [[ ! -f "${FAIL_DB}" ]]; then
@@ -184,17 +239,17 @@ CODE_COV_HINT="${MERGE_REPORT_DIR}"
   echo
   echo "## Test Pass Rate"
   echo
-  echo "| test | runs | pass | fail | pass_rate | latest_seed | latest_func_cov |"
-  echo "|---|---:|---:|---:|---:|---:|---:|"
+  echo "| test | runs | pass | fail | pass_rate | latest_seed | latest_func_cov | latest_func_cov_samples |"
+  echo "|---|---:|---:|---:|---:|---:|---:|---:|"
   awk -F, '
     NR>1{
       test=$2; runs[test]++; if($5=="PASS") pass[test]++; else fail[test]++;
-      seed[test]=$3; fcov[test]=$9;
+      seed[test]=$3; fcov[test]=$9; fsample[test]=$10;
     }
     END{
       for (t in runs) {
         pr=(runs[t]>0)?(pass[t]*100.0/runs[t]):0.0;
-        printf "| %s | %d | %d | %d | %.2f%% | %s | %s |\n", t, runs[t], pass[t]+0, fail[t]+0, pr, seed[t], fcov[t];
+        printf "| %s | %d | %d | %d | %.2f%% | %s | %s | %s |\n", t, runs[t], pass[t]+0, fail[t]+0, pr, seed[t], fcov[t], fsample[t];
       }
     }' "${RUN_DB}" | sort
   echo
@@ -229,9 +284,42 @@ CODE_COV_HINT="${MERGE_REPORT_DIR}"
   echo
   echo "## Functional Coverage Trend (latest 20 runs)"
   echo
-  echo "| timestamp | test | seed | status | func_cov(%) |"
-  echo "|---|---|---:|---|---:|"
-  tail -n +2 "${RUN_DB}" | tail -n 20 | awk -F, '{printf "| %s | %s | %s | %s | %s |\n", $1, $2, $3, $5, $9}'
+  echo "| timestamp | test | seed | status | func_cov(%) | func_cov_samples |"
+  echo "|---|---|---:|---|---:|---:|"
+  tail -n +2 "${RUN_DB}" | tail -n 20 | awk -F, '{printf "| %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $5, $9, $10}'
+  echo
+  echo "## Functional Bucket Status (V2 aggregate)"
+  echo
+  if [[ -f "${BUCKET2_DB}" ]]; then
+    total_legal_wr=$(awk -F, 'NR>1{c+=$4} END{print c+0}' "${BUCKET2_DB}")
+    total_legal_rd=$(awk -F, 'NR>1{c+=$5} END{print c+0}' "${BUCKET2_DB}")
+    total_illegal_wr=$(awk -F, 'NR>1{c+=$6} END{print c+0}' "${BUCKET2_DB}")
+    total_illegal_rd=$(awk -F, 'NR>1{c+=$7} END{print c+0}' "${BUCKET2_DB}")
+    total_ack_all=$(awk -F, 'NR>1{c+=$8} END{print c+0}' "${BUCKET2_DB}")
+    total_ack_nack=$(awk -F, 'NR>1{c+=$9} END{print c+0}' "${BUCKET2_DB}")
+    total_rd_match=$(awk -F, 'NR>1{c+=$10} END{print c+0}' "${BUCKET2_DB}")
+    echo "| bucket | hit_count | status |"
+    echo "|---|---:|---|"
+    for pair in \
+      "legal_wr:${total_legal_wr}" \
+      "legal_rd:${total_legal_rd}" \
+      "illegal_wr:${total_illegal_wr}" \
+      "illegal_rd:${total_illegal_rd}" \
+      "ack_all:${total_ack_all}" \
+      "ack_nack:${total_ack_nack}" \
+      "rd_match:${total_rd_match}"; do
+      bname=${pair%%:*}
+      bcnt=${pair##*:}
+      if [[ "${bcnt}" -gt 0 ]]; then
+        bstat="covered"
+      else
+        bstat="missing"
+      fi
+      echo "| ${bname} | ${bcnt} | ${bstat} |"
+    done
+  else
+    echo "No v2 bucket records yet."
+  fi
   echo
   echo "## Functional Coverage Average by Test"
   echo
@@ -257,11 +345,14 @@ CODE_COV_HINT="${MERGE_REPORT_DIR}"
 echo "[DONE] UVM test=${TEST_NAME}"
 echo "       top : tb_uvm_top"
 echo "       seed: ${SEED_INFO}"
+echo "       cov_scope: ${COV_SCOPE_INFO}"
 echo "       seed_file: ${SEED_FILE}"
-echo "       log : ${LOG_DIR}/${TEST_NAME}.log"
-echo "       cov : ${MISC_DIR}/Cov_Report"
+echo "       log : ${LOG_FILE}"
+echo "       log_latest: ${LATEST_LOG}"
+echo "       cov_run : ${MISC_DIR}/Cov_Report_${COV_RUN_NAME}"
 echo "       cov_merged: ${MERGE_REPORT_DIR}"
 echo "       cov_inputs: ${MERGE_LIST_FILE}"
 echo "       cov_buckets: ${BUCKET_DB}"
+echo "       cov_buckets_v2: ${BUCKET2_DB}"
 echo "       dashboard: ${DASHBOARD_FILE}"
 echo "       fsdb: ${WAVE_DIR}/${TEST_NAME}.fsdb (if enabled)"
