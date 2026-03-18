@@ -1,0 +1,11 @@
+# Nightly stress list
+# format: <test_name> [seed] [extra_plusargs...]
+
+i2c_smoke_test
+i2c_cov_closure_test
+i2c_illegal_addr_test
+i2c_illegal_read_test
+i2c_stretch_test
+i2c_rand_burst_test  +ADDR_BUCKET=LOW +BURST_LEN=1
+i2c_rand_burst_test  +ADDR_BUCKET=MID +BURST_LEN=3
+i2c_rand_burst_test  +ADDR_BUCKET=HIGH +BURST_LEN=8

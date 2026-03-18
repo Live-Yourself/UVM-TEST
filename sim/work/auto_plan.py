@@ -27,6 +27,7 @@ from datetime import datetime
 
 CORE_TESTS = [
     "i2c_smoke_test",
+    "i2c_cov_closure_test",
     "i2c_illegal_addr_test",
     "i2c_illegal_read_test",
     "i2c_stretch_test",
@@ -35,11 +36,24 @@ CORE_TESTS = [
 
 SCENARIO_MAP = {
     "i2c_smoke_test": "basic read/write loop",
+    "i2c_cov_closure_test": "functional coverage closure matrix",
     "i2c_illegal_addr_test": "illegal address NACK",
     "i2c_illegal_read_test": "illegal address READ path",
     "i2c_stretch_test": "clock low stretch timing",
     "i2c_rand_burst_test": "random burst read/write",
 }
+
+GATE_TESTS = [
+    "i2c_smoke_test",
+    "i2c_illegal_addr_test",
+    "i2c_illegal_read_test",
+    "i2c_stretch_test",
+]
+
+COVERAGE_TESTS = [
+    "i2c_cov_closure_test",
+    "i2c_rand_burst_test",
+]
 
 
 class TestStat:
@@ -115,6 +129,8 @@ def parse_args():
     p.add_argument("--target-pass-rate", type=float, default=0.90, help="Desired per-test pass rate")
     p.add_argument("--target-fcov", type=float, default=80.0, help="Desired average functional coverage(%%)")
     p.add_argument("--min-runs-per-test", type=int, default=3, help="Desired minimum historical runs per test")
+    p.add_argument("--gate-min-runs", type=int, default=1, help="Minimum planned runs for gate tests when healthy")
+    p.add_argument("--coverage-budget", type=int, default=12, help="Nominal planned items budget for coverage-oriented tests")
     p.add_argument("--max-plan-items", type=int, default=20, help="Maximum recommended run items")
     return p.parse_args()
 
@@ -201,37 +217,52 @@ def load_bucket2_stats(bucket2_db):
 def build_plan(stats, bucket, bucket2, args):
     plan = []
 
-    # Ensure core scenario coverage first
-    for t in CORE_TESTS:
+    # 1) Gate-minimized strategy:
+    #    Keep essential tests alive with minimum repetitions unless instability is detected.
+    for t in GATE_TESTS:
         s = stats.get(t, TestStat())
         if s.passed == 0:
-            for _ in range(3):
-                plan.append(PlanItem(100, t, seed_gen(), "", "no PASS history yet for this core scenario"))
+            plan.append(PlanItem(100, t, seed_gen(), "", "gate test has no PASS history"))
+            plan.append(PlanItem(95, t, seed_gen(), "", "gate test has no PASS history (confirm)"))
+            continue
 
-    # Improve robustness by pass-rate and sample count
-    for t in CORE_TESTS:
-        s = stats.get(t, TestStat())
-        if s.runs < args.min_runs_per_test:
-            extra = max(0, args.min_runs_per_test - s.runs)
-            for _ in range(extra):
-                plan.append(PlanItem(70, t, seed_gen(), "", "insufficient historical runs"))
+        # Healthy gate test: only minimal keep-alive runs
+        for _ in range(args.gate_min_runs):
+            plan.append(PlanItem(55, t, seed_gen(), "", "gate keep-alive run"))
 
-        if s.runs > 0 and s.pass_rate < args.target_pass_rate:
-            # More retries for unstable tests
-            for _ in range(2):
-                reason = "pass_rate {:.2f}% < target {:.2f}%".format(s.pass_rate() * 100.0, args.target_pass_rate * 100.0)
-                plan.append(PlanItem(80, t, seed_gen(), "", reason))
+        # Unstable gate test: add retries
+        if s.runs > 0 and s.pass_rate() < args.target_pass_rate:
+            reason = "gate unstable: pass_rate {:.2f}% < target {:.2f}%".format(s.pass_rate() * 100.0, args.target_pass_rate * 100.0)
+            plan.append(PlanItem(90, t, seed_gen(), "", reason))
+            plan.append(PlanItem(85, t, seed_gen(), "", reason))
 
-    # Coverage push: rand burst gives best fcov yield in this project
+    # 2) Coverage-priority strategy:
+    #    Prefer closure and matrix tests; use rand_burst with directed constraints.
     rb = stats.get("i2c_rand_burst_test", TestStat())
-    rb_avg = rb.avg_cov()
-    rb_cov = rb_avg if rb_avg is not None else 0.0
-    if rb_cov < args.target_fcov:
-        for _ in range(5):
-            reason = "avg functional coverage {:.2f}% < target {:.2f}%".format(rb_cov, args.target_fcov)
-            plan.append(PlanItem(60, "i2c_rand_burst_test", seed_gen(), "", reason))
+    cl = stats.get("i2c_cov_closure_test", TestStat())
 
-    # Bucket-driven targeted constraints from coverage report
+    rb_avg = rb.avg_cov()
+    cl_avg = cl.avg_cov()
+    rb_cov = rb_avg if rb_avg is not None else 0.0
+    cl_cov = cl_avg if cl_avg is not None else 0.0
+
+    rb_flat = False
+    if rb.runs >= 8 and rb.latest_cov is not None and rb_avg is not None:
+        if abs(rb.latest_cov - rb_avg) < 0.05:
+            rb_flat = True
+
+    # Ensure closure test is always in the plan when fcov target is not met
+    if cl_cov < args.target_fcov:
+        plan.append(PlanItem(92, "i2c_cov_closure_test", seed_gen(), "", "coverage priority: closure test below target"))
+        plan.append(PlanItem(90, "i2c_cov_closure_test", seed_gen(), "", "coverage priority: closure reinforcement"))
+
+    # If rand_burst is plateaued, reduce blind retries and shift to directed matrix + closure
+    if rb_flat:
+        plan.append(PlanItem(89, "i2c_cov_closure_test", seed_gen(), "", "rand_burst plateau detected; shift budget to closure"))
+    else:
+        plan.append(PlanItem(72, "i2c_rand_burst_test", seed_gen(), "", "coverage sampling run"))
+
+    # 3) Bucket-driven targeted constraints from coverage report
     if bucket.addr_high == 0:
         for _ in range(3):
             plan.append(PlanItem(95, "i2c_rand_burst_test", seed_gen(), "+ADDR_BUCKET=HIGH +BURST_LEN=5", "unhit bucket: high address region"))
@@ -271,16 +302,32 @@ def build_plan(stats, bucket, bucket2, args):
         for _ in range(2):
             plan.append(PlanItem(94, "i2c_rand_burst_test", seed_gen(), "+BURST_LEN=3", "unhit bucket: read data match path"))
 
-    # Deterministic matrix: avoid blind same-pattern retries
-    # Cover address(low/mid/high) x len(1/3/8) by construction.
+    # 4) Deterministic matrix: avoid blind same-pattern retries
+    #    Cover address(low/mid/high) x len(1/3/8) by construction.
     matrix = [
         ("LOW", 1), ("LOW", 3), ("LOW", 8),
         ("MID", 1), ("MID", 3), ("MID", 8),
         ("HIGH", 1), ("HIGH", 3), ("HIGH", 8),
     ]
+    matrix_runs = 9
+    if rb_flat:
+        matrix_runs = 9
+    else:
+        matrix_runs = 6
+
+    c = 0
     for addr, blen in matrix:
+        if c >= matrix_runs:
+            break
         reason = "targeted matrix run: addr={} len={}".format(addr, blen)
         plan.append(PlanItem(88, "i2c_rand_burst_test", seed_gen(), "+ADDR_BUCKET={} +BURST_LEN={}".format(addr, blen), reason))
+        c += 1
+
+    # 5) Coverage budget filler: prioritize closure over gate tests
+    #    (fill only when under target and there is budget)
+    if cl_cov < args.target_fcov:
+        for _ in range(max(0, args.coverage_budget // 4)):
+            plan.append(PlanItem(78, "i2c_cov_closure_test", seed_gen(), "", "coverage budget filler: closure"))
 
     # De-duplicate and cap
     dedup = {}
@@ -306,14 +353,75 @@ def write_outputs(result_base, work_dir, plan, stats, fail_top, bucket):
             w.writerow([p.priority, p.test, p.seed, p.extra_args, p.reason])
 
     with open(sh_file, "w") as f:
-        f.write("#!/bin/bash\nset -euo pipefail\n\n")
+        f.write("#!/bin/bash\nset -uo pipefail\n\n")
         f.write("# Auto-generated regression execution plan\n")
-        f.write("cd \"$(dirname \"$0\")\"/../work\n\n")
+        f.write("SCRIPT_DIR=$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\n")
+        f.write("RESULT_BASE=\"${SCRIPT_DIR}/../sim_result\"\n")
+        f.write("TMP_DIR=\"${SCRIPT_DIR}/.auto_plan_tmp\"\n")
+        f.write("FAIL_ROOT=\"${RESULT_BASE}/fail_regression_logs/auto_plan\"\n")
+        f.write("mkdir -p \"${TMP_DIR}\" \"${FAIL_ROOT}\"\n")
+        f.write("SUMMARY=\"${TMP_DIR}/auto_plan_summary_$(date +%Y%m%d_%H%M%S).csv\"\n")
+        f.write("echo \"case_id,test,seed,extra,status,runner_log,start_ts,end_ts\" > \"${SUMMARY}\"\n")
+        f.write("case_id=0\n\n")
+        f.write("run_one() {\n")
+        f.write("  local test_name=\"$1\"\n")
+        f.write("  local seed_val=\"$2\"\n")
+        f.write("  local extra_args=\"$3\"\n")
+        f.write("  local status=\"PASS\"\n")
+        f.write("  local start_ts end_ts case_log rc fail_dir sim_log latest_log\n")
+        f.write("  case_id=$((case_id + 1))\n")
+        f.write("  case_log=\"${TMP_DIR}/case_${case_id}_${test_name}.log\"\n")
+        f.write("  start_ts=$(date '+%F %T')\n")
+        f.write("  echo \"[AUTO_PLAN][CASE ${case_id}] START test=${test_name} seed=${seed_val} extra='${extra_args}'\"\n")
+        f.write("\n")
+        f.write("  if [[ -n \"${extra_args}\" ]]; then\n")
+        f.write("    bash \"${SCRIPT_DIR}/run_uvm.sh\" \"${test_name}\" \"${seed_val}\" \"${extra_args}\" >\"${case_log}\" 2>&1\n")
+        f.write("  else\n")
+        f.write("    bash \"${SCRIPT_DIR}/run_uvm.sh\" \"${test_name}\" \"${seed_val}\" >\"${case_log}\" 2>&1\n")
+        f.write("  fi\n")
+        f.write("  rc=$?\n")
+        f.write("  if [[ \"${rc}\" -ne 0 ]]; then\n")
+        f.write("    status=\"FAIL\"\n")
+        f.write("  fi\n")
+        f.write("\n")
+        f.write("  end_ts=$(date '+%F %T')\n")
+        f.write("  if [[ \"${status}\" == \"FAIL\" ]]; then\n")
+        f.write("    fail_dir=\"${FAIL_ROOT}/case_${case_id}_${test_name}_$(date +%Y%m%d_%H%M%S)\"\n")
+        f.write("    mkdir -p \"${fail_dir}\"\n")
+        f.write("    cp \"${case_log}\" \"${fail_dir}/runner.log\" || true\n")
+        f.write("    sim_log=$(grep '^       log :' \"${case_log}\" | tail -n 1 | sed -E 's/^.*log : //')\n")
+        f.write("    if [[ -n \"${sim_log}\" ]] && [[ -f \"${sim_log}\" ]]; then\n")
+        f.write("      cp \"${sim_log}\" \"${fail_dir}/sim.log\" || true\n")
+        f.write("    fi\n")
+        f.write("    latest_log=$(grep '^       log_latest:' \"${case_log}\" | tail -n 1 | sed -E 's/^.*log_latest: //')\n")
+        f.write("    if [[ -n \"${latest_log}\" ]] && [[ -f \"${latest_log}\" ]]; then\n")
+        f.write("      cp \"${latest_log}\" \"${fail_dir}/latest.log\" || true\n")
+        f.write("    fi\n")
+        f.write("    echo \"[AUTO_PLAN][CASE ${case_id}] FAIL, archived: ${fail_dir}\"\n")
+        f.write("  else\n")
+        f.write("    echo \"[AUTO_PLAN][CASE ${case_id}] PASS\"\n")
+        f.write("  fi\n")
+        f.write("\n")
+        f.write("  echo \"${case_id},${test_name},${seed_val},${extra_args},${status},${case_log},${start_ts},${end_ts}\" >> \"${SUMMARY}\"\n")
+        f.write("}\n\n")
+
         for p in plan:
-            if p.extra_args:
-                f.write("bash run_uvm.sh {} {} \"{}\"\n".format(p.test, p.seed, p.extra_args))
-            else:
-                f.write("bash run_uvm.sh {} {}\n".format(p.test, p.seed))
+            extra = p.extra_args.replace('"', '\\"') if p.extra_args else ""
+            f.write("run_one \"{}\" \"{}\" \"{}\"\n".format(p.test, p.seed, extra))
+
+        f.write("\nTOTAL=$(awk -F, 'NR>1{c++} END{print c+0}' \"${SUMMARY}\")\n")
+        f.write("PASS=$(awk -F, 'NR>1&&$5==\"PASS\"{c++} END{print c+0}' \"${SUMMARY}\")\n")
+        f.write("FAIL=$((TOTAL - PASS))\n")
+        f.write("RATE=\"0.00\"\n")
+        f.write("if [[ \"${TOTAL}\" -gt 0 ]]; then\n")
+        f.write("  RATE=$(awk -v p=\"${PASS}\" -v t=\"${TOTAL}\" 'BEGIN{printf \"%.2f\", (p*100.0)/t}')\n")
+        f.write("fi\n")
+        f.write("echo \"[AUTO_PLAN] Done: Total=${TOTAL} Pass=${PASS} Fail=${FAIL} PassRate=${RATE}%\"\n")
+        f.write("echo \"[AUTO_PLAN] Summary: ${SUMMARY}\"\n")
+        f.write("echo \"[AUTO_PLAN] Fail logs: ${FAIL_ROOT}\"\n")
+        f.write("if [[ \"${FAIL}\" -gt 0 ]]; then\n")
+        f.write("  exit 1\n")
+        f.write("fi\n")
 
     with open(md_file, "w") as f:
         f.write("# Auto Regression Plan\n\n")

@@ -106,4 +106,21 @@ class i2c_rand_burst_test extends i2c_base_test;
   endtask
 endclass
 
+class i2c_cov_closure_test extends i2c_base_test;
+  `uvm_component_utils(i2c_cov_closure_test)
+
+  function new(string name, uvm_component parent);
+    super.new(name, parent);
+  endfunction
+
+  task run_phase(uvm_phase phase);
+    i2c_cov_closure_seq seq;
+    phase.raise_objection(this);
+    seq = i2c_cov_closure_seq::type_id::create("seq");
+    seq.start(env.agent.sqr);
+    #5000ns;
+    phase.drop_objection(this);
+  endtask
+endclass
+
 

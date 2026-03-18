@@ -23,6 +23,8 @@ REPEAT=1
 NIGHTLY=0
 STOP_ON_FAIL=0
 SHOW_OUTPUT=0
+DEBUG_RERUN=0
+AUTO_DEBUG_RERUN=0
 
 usage() {
   cat <<'EOF'
@@ -35,6 +37,8 @@ Options:
       --nightly           Nightly mode tag (same behavior, richer summary banner)
       --stop-on-fail      Stop launching new runs after first failure (sequential mode)
       --show-output       Show run_uvm output (live in foreground)
+      --debug-rerun       Force enable FSDB for this regression run
+      --auto-debug-rerun  On FAIL, rerun failed case once with FSDB enabled
   -h, --help              Show this help
 EOF
 }
@@ -53,6 +57,10 @@ while [[ $# -gt 0 ]]; do
       STOP_ON_FAIL=1; shift ;;
     --show-output)
       SHOW_OUTPUT=1; shift ;;
+    --debug-rerun)
+      DEBUG_RERUN=1; shift ;;
+    --auto-debug-rerun)
+      AUTO_DEBUG_RERUN=1; shift ;;
     -h|--help)
       usage; exit 0 ;;
     *)
@@ -76,11 +84,27 @@ if [[ ! -x "${RUN_UVM}" ]]; then
   chmod +x "${RUN_UVM}" || true
 fi
 
+LIST_BASENAME=$(basename "${LIST_FILE}")
+REG_FSDB_ENABLE=0
+if [[ "${DEBUG_RERUN}" -eq 1 ]]; then
+  REG_FSDB_ENABLE=1
+elif [[ "${NIGHTLY}" -eq 1 ]]; then
+  REG_FSDB_ENABLE=0
+elif [[ "${JOBS}" -gt 1 ]]; then
+  REG_FSDB_ENABLE=0
+elif [[ "${JOBS}" -eq 1 ]]; then
+  REG_FSDB_ENABLE=1
+else
+  REG_FSDB_ENABLE=0
+fi
+
 START_TS=$(date '+%F %T')
 echo "[REG] Start : ${START_TS}"
 echo "[REG] List  : ${LIST_FILE}"
 echo "[REG] Jobs  : ${JOBS}"
 echo "[REG] Repeat: ${REPEAT}"
+echo "[REG] FSDB  : ${REG_FSDB_ENABLE} (policy: serial batch on, parallel/nightly off, debug-rerun on)"
+echo "[REG] Auto debug rerun on FAIL: ${AUTO_DEBUG_RERUN}"
 if [[ "${NIGHTLY}" -eq 1 ]]; then
   echo "[REG] Mode  : NIGHTLY"
 fi
@@ -136,20 +160,20 @@ run_one() {
 
   if [[ "${SHOW_OUTPUT}" -eq 1 ]]; then
     if [[ "${JOBS}" -gt 1 ]]; then
-      if "${cmd[@]}" 2>&1 | sed "s/^/[CASE ${cid}] /" | tee "${case_log}"; then
+      if FSDB_ENABLE="${REG_FSDB_ENABLE}" FSDB_REQUIRE="${REG_FSDB_ENABLE}" "${cmd[@]}" 2>&1 | sed "s/^/[CASE ${cid}] /" | tee "${case_log}"; then
         status="PASS"
       else
         status="FAIL"
       fi
     else
-      if "${cmd[@]}" 2>&1 | tee "${case_log}"; then
+      if FSDB_ENABLE="${REG_FSDB_ENABLE}" FSDB_REQUIRE="${REG_FSDB_ENABLE}" "${cmd[@]}" 2>&1 | tee "${case_log}"; then
         status="PASS"
       else
         status="FAIL"
       fi
     fi
   else
-    if "${cmd[@]}" >"${case_log}" 2>&1; then
+    if FSDB_ENABLE="${REG_FSDB_ENABLE}" FSDB_REQUIRE="${REG_FSDB_ENABLE}" "${cmd[@]}" >"${case_log}" 2>&1; then
       status="PASS"
     else
       status="FAIL"
@@ -170,6 +194,20 @@ run_one() {
     latest_log=$(grep '^       log_latest:' "${case_log}" | tail -n 1 | sed -E 's/^.*log_latest: //')
     if [[ -n "${latest_log}" ]] && [[ -f "${latest_log}" ]]; then
       cp "${latest_log}" "${fail_dir}/latest.log" || true
+    fi
+
+    if [[ "${AUTO_DEBUG_RERUN}" -eq 1 ]] && [[ "${REG_FSDB_ENABLE}" -eq 0 ]]; then
+      debug_log="${fail_dir}/debug_rerun.log"
+      echo "[REG][CASE ${cid}] DEBUG-RERUN with FSDB enabled"
+      if FSDB_ENABLE="1" FSDB_REQUIRE="1" "${cmd[@]}" >"${debug_log}" 2>&1; then
+        echo "[REG][CASE ${cid}] DEBUG-RERUN done"
+      else
+        echo "[REG][CASE ${cid}] DEBUG-RERUN failed, see ${debug_log}"
+      fi
+      debug_fsdb=$(grep '^       fsdb:' "${debug_log}" | tail -n 1 | sed -E 's/^.*fsdb: //; s/ \(if enabled\)$//')
+      if [[ -n "${debug_fsdb}" ]] && [[ -f "${debug_fsdb}" ]]; then
+        echo "${debug_fsdb}" > "${fail_dir}/fsdb_path.txt"
+      fi
     fi
   fi
 
