@@ -237,7 +237,7 @@ def build_plan(stats, bucket, bucket2, args):
             plan.append(PlanItem(85, t, seed_gen(), "", reason))
 
     # 2) Coverage-priority strategy:
-    #    Prefer closure and matrix tests; use rand_burst with directed constraints.
+    #    Prefer closure + mixed exploration, not only hard-directed constraints.
     rb = stats.get("i2c_rand_burst_test", TestStat())
     cl = stats.get("i2c_cov_closure_test", TestStat())
 
@@ -245,6 +245,10 @@ def build_plan(stats, bucket, bucket2, args):
     cl_avg = cl.avg_cov()
     rb_cov = rb_avg if rb_avg is not None else 0.0
     cl_cov = cl_avg if cl_avg is not None else 0.0
+
+    # Always keep one closure anchor run in every plan.
+    # This prevents plan drift where closure test disappears after hitting target once.
+    plan.append(PlanItem(84, "i2c_cov_closure_test", seed_gen(), "", "closure anchor run"))
 
     rb_flat = False
     if rb.runs >= 8 and rb.latest_cov is not None and rb_avg is not None:
@@ -256,11 +260,30 @@ def build_plan(stats, bucket, bucket2, args):
         plan.append(PlanItem(92, "i2c_cov_closure_test", seed_gen(), "", "coverage priority: closure test below target"))
         plan.append(PlanItem(90, "i2c_cov_closure_test", seed_gen(), "", "coverage priority: closure reinforcement"))
 
-    # If rand_burst is plateaued, reduce blind retries and shift to directed matrix + closure
+    # If rand_burst is plateaued, reduce blind retries and shift budget to closure + exploration.
     if rb_flat:
         plan.append(PlanItem(89, "i2c_cov_closure_test", seed_gen(), "", "rand_burst plateau detected; shift budget to closure"))
     else:
         plan.append(PlanItem(72, "i2c_rand_burst_test", seed_gen(), "", "coverage sampling run"))
+
+    # Exploration profiles for rand_burst (no fixed ADDR_BUCKET/BURST_LEN constraints).
+    # Use mild profiles when coverage is already healthy to reduce run-to-run oscillation.
+    if cl_cov >= args.target_fcov:
+        explore_profiles = [
+            (87, "+RAND_ROUNDS=4 +ILLEGAL_PCT=5", "explore profile mild-A: rounds=4 illegal=5%"),
+            (86, "+RAND_ROUNDS=8 +ILLEGAL_PCT=10", "explore profile mild-B: rounds=8 illegal=10%"),
+        ]
+    else:
+        explore_profiles = [
+            (87, "+RAND_ROUNDS=4 +ILLEGAL_PCT=10", "explore profile A: rounds=4 illegal=10%"),
+            (86, "+RAND_ROUNDS=8 +ILLEGAL_PCT=20", "explore profile B: rounds=8 illegal=20%"),
+            (85, "+RAND_ROUNDS=16 +ILLEGAL_PCT=30", "explore profile C: rounds=16 illegal=30%"),
+        ]
+    for pri, xarg, rsn in explore_profiles:
+        plan.append(PlanItem(pri, "i2c_rand_burst_test", seed_gen(), xarg, rsn))
+
+    if rb_flat:
+        plan.append(PlanItem(88, "i2c_rand_burst_test", seed_gen(), "+RAND_ROUNDS=24 +ILLEGAL_PCT=35", "plateau breaker: deeper random rounds"))
 
     # 3) Bucket-driven targeted constraints from coverage report
     if bucket.addr_high == 0:
@@ -302,18 +325,22 @@ def build_plan(stats, bucket, bucket2, args):
         for _ in range(2):
             plan.append(PlanItem(94, "i2c_rand_burst_test", seed_gen(), "+BURST_LEN=3", "unhit bucket: read data match path"))
 
-    # 4) Deterministic matrix: avoid blind same-pattern retries
+    # 4) Deterministic matrix: use as directed closure tool (not always full-force).
     #    Cover address(low/mid/high) x len(1/3/8) by construction.
     matrix = [
         ("LOW", 1), ("LOW", 3), ("LOW", 8),
         ("MID", 1), ("MID", 3), ("MID", 8),
         ("HIGH", 1), ("HIGH", 3), ("HIGH", 8),
     ]
-    matrix_runs = 9
-    if rb_flat:
+    v1_missing = (bucket.addr_low == 0 or bucket.addr_mid == 0 or bucket.addr_high == 0 or
+                  bucket.len_single == 0 or bucket.len_short == 0 or bucket.len_burst == 0)
+
+    if v1_missing:
         matrix_runs = 9
+    elif rb_flat:
+        matrix_runs = 3
     else:
-        matrix_runs = 6
+        matrix_runs = 5
 
     c = 0
     for addr, blen in matrix:
@@ -323,11 +350,13 @@ def build_plan(stats, bucket, bucket2, args):
         plan.append(PlanItem(88, "i2c_rand_burst_test", seed_gen(), "+ADDR_BUCKET={} +BURST_LEN={}".format(addr, blen), reason))
         c += 1
 
-    # 5) Coverage budget filler: prioritize closure over gate tests
+    # 5) Coverage budget filler: prioritize closure + unconstrained rand_burst
     #    (fill only when under target and there is budget)
     if cl_cov < args.target_fcov:
         for _ in range(max(0, args.coverage_budget // 4)):
             plan.append(PlanItem(78, "i2c_cov_closure_test", seed_gen(), "", "coverage budget filler: closure"))
+        for _ in range(max(0, args.coverage_budget // 4)):
+            plan.append(PlanItem(77, "i2c_rand_burst_test", seed_gen(), "+RAND_ROUNDS=8 +ILLEGAL_PCT=15", "coverage budget filler: mixed random"))
 
     # De-duplicate and cap
     dedup = {}

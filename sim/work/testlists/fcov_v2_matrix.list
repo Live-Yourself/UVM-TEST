@@ -1,0 +1,42 @@
+# Functional coverage V2 closure matrix
+# Goal: close these buckets: legal_wr/legal_rd/illegal_wr/illegal_rd/ack_all/ack_nack/rd_match
+# format: <test_name> [seed] [extra_plusargs...]
+
+# A. Path buckets (direct mapping)
+i2c_smoke_test
+# -> legal_wr + legal_rd + ack_all + rd_match
+
+# One-shot closure test (matrix + illegal paths in one run)
+i2c_cov_closure_test
+# -> tries to hit most function bins in a single test
+
+i2c_illegal_addr_test
+# -> illegal_wr + ack_nack
+
+i2c_illegal_read_test
+# -> illegal_rd + ack_nack
+
+# B. Address x Length matrix (stimulus diversity)
+# LOW
+# len=1
+i2c_rand_burst_test  +ADDR_BUCKET=LOW +BURST_LEN=1
+# len=3
+i2c_rand_burst_test  +ADDR_BUCKET=LOW +BURST_LEN=3
+# len=8
+i2c_rand_burst_test  +ADDR_BUCKET=LOW +BURST_LEN=8
+
+# MID
+# len=1
+i2c_rand_burst_test  +ADDR_BUCKET=MID +BURST_LEN=1
+# len=3
+i2c_rand_burst_test  +ADDR_BUCKET=MID +BURST_LEN=3
+# len=8
+i2c_rand_burst_test  +ADDR_BUCKET=MID +BURST_LEN=8
+
+# HIGH
+# len=1
+i2c_rand_burst_test  +ADDR_BUCKET=HIGH +BURST_LEN=1
+# len=3
+i2c_rand_burst_test  +ADDR_BUCKET=HIGH +BURST_LEN=3
+# len=8
+i2c_rand_burst_test  +ADDR_BUCKET=HIGH +BURST_LEN=8

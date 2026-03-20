@@ -16,6 +16,7 @@
 
   function void connect_phase(uvm_phase phase);
     super.connect_phase(phase);
-    agent.drv.ap.connect(scb.imp);
+    agent.drv.ap.connect(scb.imp_drv);
+    agent.mon.ap.connect(scb.imp_mon);
   endfunction
 endclass

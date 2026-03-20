@@ -1,7 +1,13 @@
+`uvm_analysis_imp_decl(_drv)
+`uvm_analysis_imp_decl(_mon)
+
 class i2c_scoreboard extends uvm_component;
   `uvm_component_utils(i2c_scoreboard)
 
-  uvm_analysis_imp#(i2c_item, i2c_scoreboard) imp;
+  uvm_analysis_imp_drv#(i2c_item, i2c_scoreboard) imp_drv;
+  uvm_analysis_imp_mon#(i2c_item, i2c_scoreboard) imp_mon;
+  i2c_cfg cfg;
+
   byte unsigned model_mem [byte unsigned];
   real func_cov_pct;
   int unsigned txn_cnt;
@@ -21,6 +27,12 @@ class i2c_scoreboard extends uvm_component;
   bit hit_ack_all;
   bit hit_ack_nack;
   bit hit_rd_cmp_match;
+
+  // Driver-vs-monitor consistency telemetry
+  string drv_sig_q[$];
+  string mon_sig_q[$];
+  int unsigned cmp_pair_cnt;
+  int unsigned cmp_mismatch_cnt;
 
   // Requirement-driven functional coverage model:
   // 1) transaction legality/op path
@@ -88,11 +100,57 @@ class i2c_scoreboard extends uvm_component;
 
   function new(string name, uvm_component parent);
     super.new(name, parent);
-    imp = new("imp", this);
+    imp_drv = new("imp_drv", this);
+    imp_mon = new("imp_mon", this);
     cg_i2c_func = new();
   endfunction
 
-  function void write(i2c_item tr);
+  function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    if (!uvm_config_db#(i2c_cfg)::get(this, "", "cfg", cfg)) begin
+      cfg = i2c_cfg::type_id::create("cfg");
+      `uvm_warning("NOCFG", "scoreboard cfg not set, use default")
+    end
+  endfunction
+
+  function string tr_sig(i2c_item tr);
+    int unsigned n;
+    bit is_read_i;
+    is_read_i = (tr.op == I2C_READ);
+    n = is_read_i ? ((tr.rd_len != 0) ? tr.rd_len : tr.rdata.size()) : tr.wdata.size();
+    return $sformatf("op=%0d dev=0x%02h reg=0x%02h len=%0d", tr.op, tr.dev_addr, tr.reg_addr, n);
+  endfunction
+
+  function void try_compare_streams();
+    string d;
+    string m;
+    while ((drv_sig_q.size() > 0) && (mon_sig_q.size() > 0)) begin
+      d = drv_sig_q.pop_front();
+      m = mon_sig_q.pop_front();
+      cmp_pair_cnt++;
+      if (d != m) begin
+        cmp_mismatch_cnt++;
+        if (cfg.enable_mon_drv_compare)
+          `uvm_warning("SCB_CMP", $sformatf("drv/mon mismatch drv={%s} mon={%s}", d, m))
+      end
+    end
+  endfunction
+
+  function void write_drv(i2c_item tr);
+    drv_sig_q.push_back(tr_sig(tr));
+    try_compare_streams();
+    if (!cfg.use_monitor_primary)
+      process_tr(tr, "DRV");
+  endfunction
+
+  function void write_mon(i2c_item tr);
+    mon_sig_q.push_back(tr_sig(tr));
+    try_compare_streams();
+    if (cfg.use_monitor_primary)
+      process_tr(tr, "MON");
+  endfunction
+
+  function void process_tr(i2c_item tr, string src);
     int i;
     bit is_read_i;
     bit legal_i;
@@ -183,18 +241,18 @@ class i2c_scoreboard extends uvm_component;
       for (i = 0; i < tr.wdata.size(); i++) begin
         model_mem[tr.reg_addr + i] = tr.wdata[i];
       end
-      `uvm_info("SCB", $sformatf("Model update reg=0x%02h data0=0x%02h", tr.reg_addr, tr.wdata[0]), UVM_MEDIUM)
+      `uvm_info("SCB", $sformatf("[%s] Model update reg=0x%02h data0=0x%02h", src, tr.reg_addr, tr.wdata[0]), UVM_MEDIUM)
     end
 
     if (tr.op == I2C_READ && tr.dev_addr == 7'h42) begin
       if (tr.rdata.size() == 0) begin
-        `uvm_error("SCB", "READ transaction has empty rdata")
+        `uvm_error("SCB", $sformatf("[%s] READ transaction has empty rdata", src))
         return;
       end
 
       n = tr.rdata.size();
       if (tr.rd_len != 0 && tr.rd_len != n)
-        `uvm_warning("SCB", $sformatf("READ length mismatch req=%0d got=%0d", tr.rd_len, n))
+        `uvm_warning("SCB", $sformatf("[%s] READ length mismatch req=%0d got=%0d", src, tr.rd_len, n))
 
       for (i = 0; i < n; i++) begin
         if (!model_mem.exists(tr.reg_addr + i)) begin
@@ -206,10 +264,10 @@ class i2c_scoreboard extends uvm_component;
         if (tr.rdata[i] !== exp)
           begin
             mismatch_any = 1'b1;
-            `uvm_error("SCB", $sformatf("READ mismatch reg=0x%02h exp=0x%02h got=0x%02h", tr.reg_addr + i, exp, tr.rdata[i]))
+            `uvm_error("SCB", $sformatf("[%s] READ mismatch reg=0x%02h exp=0x%02h got=0x%02h", src, tr.reg_addr + i, exp, tr.rdata[i]))
           end
         else
-          `uvm_info("SCB", $sformatf("READ match reg=0x%02h data=0x%02h", tr.reg_addr + i, tr.rdata[i]), UVM_MEDIUM)
+          `uvm_info("SCB", $sformatf("[%s] READ match reg=0x%02h data=0x%02h", src, tr.reg_addr + i, tr.rdata[i]), UVM_MEDIUM)
       end
 
       read_cmp_cnt++;
@@ -232,6 +290,7 @@ class i2c_scoreboard extends uvm_component;
       `uvm_error("SCB_FCOV", "no transactions reached scoreboard, functional coverage is invalid")
     `uvm_info("SCB_FCOV", $sformatf("functional_coverage=%0.2f%% samples=%0d", func_cov_pct, txn_cnt), UVM_LOW)
     `uvm_info("SCB_FCOV", $sformatf("read_compare_txn=%0d read_mismatch_txn=%0d", read_cmp_cnt, read_mismatch_txn_cnt), UVM_LOW)
+    `uvm_info("SCB_CMP", $sformatf("primary=%s drv_q=%0d mon_q=%0d pairs=%0d mismatches=%0d compare_en=%0d", cfg.use_monitor_primary ? "MON" : "DRV", drv_sig_q.size(), mon_sig_q.size(), cmp_pair_cnt, cmp_mismatch_cnt, cfg.enable_mon_drv_compare), UVM_LOW)
     `uvm_info("SCB_BUCKET", $sformatf("addr_low=%0d addr_mid=%0d addr_high=%0d len_single=%0d len_short=%0d len_burst=%0d illegal_read=%0d", hit_addr_low, hit_addr_mid, hit_addr_high, hit_len_single, hit_len_short, hit_len_burst, hit_illegal_read), UVM_LOW)
     `uvm_info("SCB_BUCKET2", $sformatf("legal_wr=%0d legal_rd=%0d illegal_wr=%0d illegal_rd=%0d ack_all=%0d ack_nack=%0d rd_match=%0d", hit_legal_wr, hit_legal_rd, hit_illegal_wr, hit_illegal_rd, hit_ack_all, hit_ack_nack, hit_rd_cmp_match), UVM_LOW)
   endfunction

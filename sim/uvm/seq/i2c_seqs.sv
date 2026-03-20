@@ -1,4 +1,4 @@
-﻿class i2c_base_seq extends uvm_sequence#(i2c_item);
+class i2c_base_seq extends uvm_sequence#(i2c_item);
   `uvm_object_utils(i2c_base_seq)
 
   function new(string name = "i2c_base_seq");

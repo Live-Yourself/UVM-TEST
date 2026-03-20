@@ -1,4 +1,4 @@
-﻿class i2c_driver extends uvm_driver#(i2c_item);
+class i2c_driver extends uvm_driver#(i2c_item);
   `uvm_component_utils(i2c_driver)
 
   virtual i2c_if vif;
