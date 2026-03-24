@@ -14,6 +14,18 @@ EXTRA_PLUSARGS=${3:-}
 CDIR=$(pwd)
 RESULT_BASE="$CDIR/../sim_result"
 
+# Arg normalization:
+# If 2nd argument is not numeric, treat it as EXTRA_PLUSARGS rather than SEED.
+# This supports calling style: bash run_uvm.sh <test> +SCB_SRC=MON
+if [[ -n "${SEED_ARG}" ]] && [[ ! "${SEED_ARG}" =~ ^[0-9]+$ ]]; then
+  if [[ -n "${EXTRA_PLUSARGS}" ]]; then
+    EXTRA_PLUSARGS="${SEED_ARG} ${EXTRA_PLUSARGS}"
+  else
+    EXTRA_PLUSARGS="${SEED_ARG}"
+  fi
+  SEED_ARG=""
+fi
+
 RESULT_ROOT="$RESULT_BASE/${TEST_NAME}"
 WAVE_DIR="$RESULT_ROOT/wave"
 LOG_DIR="$RESULT_ROOT/log"
