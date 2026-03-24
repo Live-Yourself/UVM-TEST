@@ -25,6 +25,8 @@ STOP_ON_FAIL=0
 SHOW_OUTPUT=0
 DEBUG_RERUN=0
 AUTO_DEBUG_RERUN=0
+MON_SAMPLE_ENABLE=0
+MON_SAMPLE_CASES=0
 
 usage() {
   cat <<'EOF'
@@ -39,6 +41,9 @@ Options:
       --show-output       Show run_uvm output (live in foreground)
       --debug-rerun       Force enable FSDB for this regression run
       --auto-debug-rerun  On FAIL, rerun failed case once with FSDB enabled
+      --mon-sample        Enable MON compare sampling (smoke default 1 case, nightly default 2 cases)
+      --mon-sample-cases <N>
+                          Enable MON compare sampling and force exactly N sampled cases
   -h, --help              Show this help
 EOF
 }
@@ -61,6 +66,10 @@ while [[ $# -gt 0 ]]; do
       DEBUG_RERUN=1; shift ;;
     --auto-debug-rerun)
       AUTO_DEBUG_RERUN=1; shift ;;
+    --mon-sample)
+      MON_SAMPLE_ENABLE=1; shift ;;
+    --mon-sample-cases)
+      MON_SAMPLE_ENABLE=1; MON_SAMPLE_CASES="$2"; shift 2 ;;
     -h|--help)
       usage; exit 0 ;;
     *)
@@ -98,6 +107,14 @@ else
   REG_FSDB_ENABLE=0
 fi
 
+if [[ "${MON_SAMPLE_ENABLE}" -eq 1 ]] && [[ "${MON_SAMPLE_CASES}" -eq 0 ]]; then
+  if [[ "${NIGHTLY}" -eq 1 ]] || [[ "${LIST_BASENAME}" == "nightly.list" ]]; then
+    MON_SAMPLE_CASES=2
+  else
+    MON_SAMPLE_CASES=1
+  fi
+fi
+
 START_TS=$(date '+%F %T')
 echo "[REG] Start : ${START_TS}"
 echo "[REG] List  : ${LIST_FILE}"
@@ -105,6 +122,7 @@ echo "[REG] Jobs  : ${JOBS}"
 echo "[REG] Repeat: ${REPEAT}"
 echo "[REG] FSDB  : ${REG_FSDB_ENABLE} (policy: serial batch on, parallel/nightly off, debug-rerun on)"
 echo "[REG] Auto debug rerun on FAIL: ${AUTO_DEBUG_RERUN}"
+echo "[REG] MON sample mode: ${MON_SAMPLE_ENABLE}, sample_cases=${MON_SAMPLE_CASES}"
 if [[ "${NIGHTLY}" -eq 1 ]]; then
   echo "[REG] Mode  : NIGHTLY"
 fi
@@ -112,7 +130,7 @@ fi
 TMP_DIR="${SCRIPT_DIR}/.reg_tmp"
 mkdir -p "${TMP_DIR}"
 SUMMARY_CSV="${TMP_DIR}/regression_batch_$(date +%Y%m%d_%H%M%S).csv"
-echo "case_id,test,seed,extra,status,case_log,start_ts,end_ts" > "${SUMMARY_CSV}"
+echo "case_id,test,seed,extra,status,case_log,start_ts,end_ts,mon_sampled" > "${SUMMARY_CSV}"
 
 FAIL_ROOT="${SCRIPT_DIR}/../sim_result/fail_logs"
 if [[ "${NIGHTLY}" -eq 1 ]]; then
@@ -125,6 +143,7 @@ fi
 mkdir -p "${FAIL_MODE_DIR}"
 
 case_id=0
+mon_sample_used=0
 pids=()
 declare -A pid_case
 
@@ -139,7 +158,7 @@ await_slot() {
 }
 
 run_one() {
-  local cid="$1" test_name="$2" seed_val="$3" extra_args="$4"
+  local cid="$1" test_name="$2" seed_val="$3" extra_args="$4" mon_sampled="$5"
   local status="PASS"
   local case_log="${TMP_DIR}/case_${cid}_${test_name}.log"
   local start_ts end_ts
@@ -213,7 +232,7 @@ run_one() {
 
   echo "[REG][CASE ${cid}] DONE status=${status}"
 
-  echo "${cid},${test_name},${seed_val},${extra_args},${status},${case_log},${start_ts},${end_ts}" >> "${SUMMARY_CSV}"
+  echo "${cid},${test_name},${seed_val},${extra_args},${status},${case_log},${start_ts},${end_ts},${mon_sampled}" >> "${SUMMARY_CSV}"
 }
 
 while IFS= read -r line || [[ -n "$line" ]]; do
@@ -242,15 +261,29 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
   for ((i=1; i<=REPEAT; i++)); do
     case_id=$((case_id + 1))
+    effective_extra_args="${extra_args}"
+    mon_sampled=0
+
+    if [[ "${MON_SAMPLE_ENABLE}" -eq 1 ]] && [[ "${mon_sample_used}" -lt "${MON_SAMPLE_CASES}" ]]; then
+      if [[ ! " ${effective_extra_args} " =~ " +SCB_SRC=" ]]; then
+        if [[ -n "${effective_extra_args}" ]]; then
+          effective_extra_args="${effective_extra_args} "
+        fi
+        effective_extra_args="${effective_extra_args}+SCB_SRC=MON +SCB_COMPARE=1"
+        mon_sample_used=$((mon_sample_used + 1))
+        mon_sampled=1
+        echo "[REG][CASE ${case_id}] MON sample injected (+SCB_SRC=MON +SCB_COMPARE=1)"
+      fi
+    fi
 
     if [[ "${JOBS}" -gt 1 ]]; then
       await_slot
-      run_one "${case_id}" "${test_name}" "${seed_val}" "${extra_args}" &
+      run_one "${case_id}" "${test_name}" "${seed_val}" "${effective_extra_args}" "${mon_sampled}" &
       pid=$!
       pids+=("${pid}")
       pid_case["${pid}"]="${case_id}:${test_name}"
     else
-      run_one "${case_id}" "${test_name}" "${seed_val}" "${extra_args}"
+      run_one "${case_id}" "${test_name}" "${seed_val}" "${effective_extra_args}" "${mon_sampled}"
       if [[ "${STOP_ON_FAIL}" -eq 1 ]]; then
         last_status=$(tail -n 1 "${SUMMARY_CSV}" | awk -F, '{print $5}')
         if [[ "${last_status}" == "FAIL" ]]; then
