@@ -106,6 +106,7 @@ class i2c_driver extends uvm_driver#(i2c_item);
     int i;
     int unsigned n;
 
+//    tr.rdata = new[1];
     n = (tr.rd_len == 0) ? 1 : tr.rd_len;
     tr.rdata = new[n];
 
@@ -118,9 +119,11 @@ class i2c_driver extends uvm_driver#(i2c_item);
     start_cond();
     write_byte({tr.dev_addr, 1'b1}, ack);
     tr.ack_bits.push_back(ack);
-    for (i = 0; i < n; i++) begin
-      read_byte(d, (i == n - 1));
-      tr.rdata[i] = d;
+//    read_byte(d, 1'b0);
+//    tr.rdata[0] = d;
+    for (i = 0; i < n; i++)begin
+	read_byte(d, (i == n-1));
+	tr.rdata[i] = d;
     end
     stop_cond();
   endtask

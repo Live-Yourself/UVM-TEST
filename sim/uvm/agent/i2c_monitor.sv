@@ -70,16 +70,13 @@ class i2c_monitor extends uvm_component;
         for (i = 0; i < n; i++)
           tr.wdata[i] = byte_q[i + 2];
         tr.rd_len = 0;
-
         // After write data, internal pointer in DUT auto-increments.
         pending_reg_valid = 1'b1;
         pending_reg_addr  = tr.reg_addr + n[7:0];
       end else begin
-        // Pointer-only write segment. Defer publication and merge with
-        // following read segment (repeated START flow) to match driver txn semantics.
         pending_reg_valid = 1'b1;
         pending_reg_addr  = tr.reg_addr;
-        return;
+	return;
       end
     end else begin
       // READ segment: [addr+r][rdata...]

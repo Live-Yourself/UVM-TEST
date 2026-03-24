@@ -1,4 +1,4 @@
-﻿class i2c_env extends uvm_env;
+class i2c_env extends uvm_env;
   `uvm_component_utils(i2c_env)
 
   i2c_agent      agent;
