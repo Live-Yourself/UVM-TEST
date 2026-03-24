@@ -57,7 +57,6 @@ class i2c_monitor extends uvm_component;
     if (addr_rw[0] == 1'b0) begin
       // WRITE segment: [addr+w][reg][data...]
       tr.op = I2C_WRITE;
-      mon_write_cnt++;
 
       if (byte_q.size() >= 2)
         tr.reg_addr = byte_q[1];
@@ -65,6 +64,7 @@ class i2c_monitor extends uvm_component;
         tr.reg_addr = 8'h00;
 
       if (byte_q.size() > 2) begin
+        mon_write_cnt++;
         n = byte_q.size() - 2;
         tr.wdata = new[n];
         for (i = 0; i < n; i++)
@@ -75,11 +75,11 @@ class i2c_monitor extends uvm_component;
         pending_reg_valid = 1'b1;
         pending_reg_addr  = tr.reg_addr + n[7:0];
       end else begin
-        // Register pointer write (often followed by repeated START + read)
-        tr.wdata = new[0];
-        tr.rd_len = 0;
+        // Pointer-only write segment. Defer publication and merge with
+        // following read segment (repeated START flow) to match driver txn semantics.
         pending_reg_valid = 1'b1;
         pending_reg_addr  = tr.reg_addr;
+        return;
       end
     end else begin
       // READ segment: [addr+r][rdata...]
@@ -153,6 +153,8 @@ class i2c_monitor extends uvm_component;
           mon_stop_cnt++;
           if (in_frame)
             decode_and_publish();
+          // STOP terminates transaction context; clear deferred pointer.
+          pending_reg_valid = 1'b0;
           in_frame = 1'b0;
           bit_pos = 0;
           cur_byte = 8'h00;
