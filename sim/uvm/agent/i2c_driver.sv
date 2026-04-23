@@ -139,6 +139,7 @@ class i2c_driver extends uvm_driver#(i2c_item);
         I2C_WRITE: do_write(tr);
         I2C_READ : do_read(tr);
       endcase
+      `uvm_info("DRV_ACK", $sformatf("Done: %s", tr.convert2string()), UVM_MEDIUM)
       ap.write(tr);
       seq_item_port.item_done();
     end

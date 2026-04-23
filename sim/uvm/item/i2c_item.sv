@@ -23,8 +23,8 @@ class i2c_item extends uvm_sequence_item;
   endfunction
 
   function string convert2string();
-    return $sformatf("op=%s dev=0x%02h reg=0x%02h wlen=%0d rd_len=%0d rlen=%0d",
+    return $sformatf("op=%s dev=0x%02h reg=0x%02h wlen=%0d rd_len=%0d rlen=%0d ack=%p",
                      (op == I2C_WRITE) ? "WRITE" : "READ",
-                     dev_addr, reg_addr, wdata.size(), rd_len, rdata.size());
+                     dev_addr, reg_addr, wdata.size(), rd_len, rdata.size(), ack_bits);
   endfunction
 endclass

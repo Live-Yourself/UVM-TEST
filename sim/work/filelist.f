@@ -3,6 +3,7 @@
 +incdir+/home/huhh/uvm_auto_regression/sim/uvm/seq
 +incdir+/home/huhh/uvm_auto_regression/sim/uvm/agent
 +incdir+/home/huhh/uvm_auto_regression/sim/uvm/env
++incdir+/home/huhh/uvm_auto_regression/sim/uvm/cov
 +incdir+/home/huhh/uvm_auto_regression/sim/uvm/test
 +incdir+/home/huhh/uvm_auto_regression/sim/uvm/pkg
 +incdir+/home/huhh/uvm_auto_regression/rtl

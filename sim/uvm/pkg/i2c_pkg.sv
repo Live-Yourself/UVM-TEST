@@ -9,6 +9,7 @@ package i2c_pkg;
   `include "i2c_driver.sv"
   `include "i2c_monitor.sv"
   `include "i2c_agent.sv"
+  `include "../cov/i2c_cov.sv"
   `include "i2c_scoreboard.sv"
   `include "i2c_env.sv"
   `include "i2c_tests.sv"

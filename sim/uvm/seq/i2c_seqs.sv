@@ -83,14 +83,22 @@ class i2c_clock_stretch_seq extends i2c_base_seq;
 
   virtual task body();
     i2c_item tr;
-    tr = i2c_item::type_id::create("tr");
-    start_item(tr);
-    tr.op       = I2C_WRITE;
-    tr.dev_addr = 7'h42;
-    tr.reg_addr = 8'h30;
-    tr.wdata    = new[1];
-    tr.wdata[0] = 8'h5A;
-    finish_item(tr);
+    int rr;
+
+    // Dedicated clock-stretch stress:
+    // legal WRITE-only traffic, short length, repeated transactions.
+    // Avoids overlap with smoke(readback) and illegal tests.
+    for (rr = 0; rr < 6; rr++) begin
+      tr = i2c_item::type_id::create($sformatf("tr_%0d", rr));
+      start_item(tr);
+      tr.op       = I2C_WRITE;
+      tr.dev_addr = 7'h42;
+      tr.reg_addr = 8'h68 + rr; // MID bucket
+      tr.wdata    = new[2];     // short length bucket
+      tr.wdata[0] = 8'h50 + rr;
+      tr.wdata[1] = 8'hA0 + rr;
+      finish_item(tr);
+    end
   endtask
 endclass
 
@@ -100,13 +108,11 @@ class i2c_rand_burst_seq extends i2c_base_seq;
   rand int unsigned burst_len;
   rand bit [7:0] start_reg;
   rand int unsigned rounds;
-  rand int unsigned illegal_pct;
 
   constraint c_burst {
     burst_len == 5;
     start_reg inside {[8'h00:8'hF0]};
     rounds inside {[1:10]};
-    illegal_pct inside {[0:100]};
   }
 
   function new(string name = "i2c_rand_burst_seq");
@@ -120,14 +126,11 @@ class i2c_rand_burst_seq extends i2c_base_seq;
     string arg_val;
     int blen;
     int rnum;
-    int ipct;
     int rr;
     bit [7:0] reg_lo;
     bit [7:0] reg_hi;
     int unsigned eff_burst_len;
     int unsigned eff_rounds;
-    int unsigned eff_illegal_pct;
-    bit do_illegal;
 
     clp = uvm_cmdline_processor::get_inst();
     reg_lo = 8'h00;
@@ -139,7 +142,6 @@ class i2c_rand_burst_seq extends i2c_base_seq;
     // Must set after randomize(); otherwise burst_len may be uninitialized.
     eff_burst_len = burst_len;
     eff_rounds = rounds;
-    eff_illegal_pct = illegal_pct;
 
     if (clp.get_arg_value("+BURST_LEN=", arg_val)) begin
       blen = arg_val.atoi();
@@ -151,15 +153,6 @@ class i2c_rand_burst_seq extends i2c_base_seq;
       rnum = arg_val.atoi();
       if (rnum >= 1 && rnum <= 64)
         eff_rounds = rnum;
-    end
-
-    if (clp.get_arg_value("+ILLEGAL_PCT=", arg_val)) begin
-      ipct = arg_val.atoi();
-      if (ipct < 0)
-        ipct = 0;
-      if (ipct > 100)
-        ipct = 100;
-      eff_illegal_pct = ipct;
     end
 
     if (clp.get_arg_value("+ADDR_BUCKET=", arg_val)) begin
@@ -179,15 +172,13 @@ class i2c_rand_burst_seq extends i2c_base_seq;
       if (!std::randomize(start_reg) with { start_reg inside {[reg_lo:reg_hi]}; })
         `uvm_fatal("SEQ", "randomize start_reg failed")
 
-      do_illegal = ($urandom_range(0, 99) < eff_illegal_pct);
-
       wr = i2c_item::type_id::create($sformatf("wr_%0d", rr));
       start_item(wr);
       if (!wr.randomize() with {
         op == I2C_WRITE;
-        dev_addr == (do_illegal ? 7'h55 : 7'h42);
+        dev_addr == 7'h42;
         reg_addr == start_reg;
-        wdata.size() == (do_illegal ? 1 : eff_burst_len);
+        wdata.size() == eff_burst_len;
       }) begin
         `uvm_fatal("SEQ", "randomize write item failed")
       end
@@ -197,10 +188,10 @@ class i2c_rand_burst_seq extends i2c_base_seq;
       start_item(rd);
       if (!rd.randomize() with {
         op == I2C_READ;
-        dev_addr == (do_illegal ? 7'h55 : 7'h42);
+        dev_addr == 7'h42;
         reg_addr == start_reg;
         wdata.size() == 0;
-        rd_len == (do_illegal ? 1 : eff_burst_len);
+        rd_len == eff_burst_len;
       }) begin
         `uvm_fatal("SEQ", "randomize read item failed")
       end
@@ -219,24 +210,24 @@ class i2c_cov_closure_seq extends i2c_base_seq;
   virtual task body();
     i2c_item wr;
     i2c_item rd;
-    i2c_item ill_wr;
-    i2c_item ill_rd;
     int i;
     int j;
     int k;
-    int unsigned lens[3];
+    int unsigned lens[2];
     bit [7:0] base_addr[3];
 
-    // 3x3 matrix: addr(low/mid/high) x len(1/3/8)
-    lens[0] = 1;
-    lens[1] = 3;
-    lens[2] = 8;
+    // Focused legal closure matrix (deterministic):
+    // addr(low/mid/high) x len(short/burst).
+    // Excludes illegal traffic (covered by dedicated illegal tests)
+    // and excludes single-len smoke point to reduce overlap.
+    lens[0] = 3;
+    lens[1] = 8;
     base_addr[0] = 8'h10; // LOW
     base_addr[1] = 8'h50; // MID
     base_addr[2] = 8'hD0; // HIGH
 
     for (i = 0; i < 3; i++) begin
-      for (j = 0; j < 3; j++) begin
+      for (j = 0; j < 2; j++) begin
         wr = i2c_item::type_id::create($sformatf("wr_%0d_%0d", i, j));
         start_item(wr);
         wr.op       = I2C_WRITE;
@@ -257,28 +248,6 @@ class i2c_cov_closure_seq extends i2c_base_seq;
         rd.rd_len   = lens[j];
         finish_item(rd);
       end
-    end
-
-    // Illegal write/read to guarantee illegal buckets and NACK path
-    for (i = 0; i < 2; i++) begin
-      ill_wr = i2c_item::type_id::create($sformatf("ill_wr_%0d", i));
-      start_item(ill_wr);
-      ill_wr.op       = I2C_WRITE;
-      ill_wr.dev_addr = 7'h55;
-      ill_wr.reg_addr = (i == 0) ? 8'h22 : 8'hC8;
-      ill_wr.rd_len   = 0;
-      ill_wr.wdata    = new[1];
-      ill_wr.wdata[0] = 8'h3C;
-      finish_item(ill_wr);
-
-      ill_rd = i2c_item::type_id::create($sformatf("ill_rd_%0d", i));
-      start_item(ill_rd);
-      ill_rd.op       = I2C_READ;
-      ill_rd.dev_addr = 7'h55;
-      ill_rd.reg_addr = (i == 0) ? 8'h24 : 8'hCC;
-      ill_rd.wdata    = new[0];
-      ill_rd.rd_len   = 1;
-      finish_item(ill_rd);
     end
   endtask
 endclass
