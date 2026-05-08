@@ -12,9 +12,10 @@ TEST_NAME=${1:-i2c_smoke_test}
 SEED_ARG=${2:-}
 EXTRA_PLUSARGS=${3:-}
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-PROJECT_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
+SIM_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+PROJECT_ROOT=$(cd "${SIM_ROOT}/.." && pwd)
 CDIR="${SCRIPT_DIR}"
-RESULT_BASE="$CDIR/../sim_result"
+RESULT_BASE="${SIM_ROOT}/sim_result"
 
 # Arg normalization:
 # If 2nd argument is not numeric, treat it as EXTRA_PLUSARGS rather than SEED.
@@ -205,4 +206,8 @@ if [[ -f "${CDIR}/run_summarize.sh" ]]; then
 else
   echo "[ERR] missing post script: ${SCRIPT_DIR}/run_summarize.sh"
   exit 2
+fi
+
+if [[ "${RUN_STATUS:-FAIL}" != "PASS" ]]; then
+  exit 1
 fi
