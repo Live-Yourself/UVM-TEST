@@ -11,8 +11,11 @@ set -euo pipefail
 TEST_NAME=${1:-i2c_smoke_test}
 SEED_ARG=${2:-}
 EXTRA_PLUSARGS=${3:-}
-CDIR=$(pwd)
-RESULT_BASE="$CDIR/../sim_result"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SIM_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+PROJECT_ROOT=$(cd "${SIM_ROOT}/.." && pwd)
+CDIR="${SCRIPT_DIR}"
+RESULT_BASE="${SIM_ROOT}/sim_result"
 
 # Arg normalization:
 # If 2nd argument is not numeric, treat it as EXTRA_PLUSARGS rather than SEED.
@@ -51,6 +54,27 @@ LOG_FILE="${LOG_DIR}/${COV_RUN_NAME}.log"
 LATEST_LOG="${LOG_DIR}/${TEST_NAME}.log"
 RUN_WORK_DIR="${MISC_DIR}/work_${COV_RUN_NAME}_$$"
 mkdir -p "${RUN_WORK_DIR}"
+FILELIST_PATH="${RUN_WORK_DIR}/filelist.abs.f"
+cat > "${FILELIST_PATH}" <<EOF
++incdir+${PROJECT_ROOT}/sim/uvm/if
++incdir+${PROJECT_ROOT}/sim/uvm/item
++incdir+${PROJECT_ROOT}/sim/uvm/seq
++incdir+${PROJECT_ROOT}/sim/uvm/agent
++incdir+${PROJECT_ROOT}/sim/uvm/env
++incdir+${PROJECT_ROOT}/sim/uvm/test
++incdir+${PROJECT_ROOT}/sim/uvm/pkg
++incdir+${PROJECT_ROOT}/rtl
+
+${PROJECT_ROOT}/sim/uvm/if/i2c_if.sv
+${PROJECT_ROOT}/sim/uvm/pkg/i2c_pkg.sv
+${PROJECT_ROOT}/sim/tb/tb_uvm_top.sv
+
+${PROJECT_ROOT}/rtl/scl_sda_filter.v
+${PROJECT_ROOT}/rtl/i2c_shift_reg.v
+${PROJECT_ROOT}/rtl/reg_file.v
+${PROJECT_ROOT}/rtl/i2c_rx_fsm.v
+${PROJECT_ROOT}/rtl/i2c_slave_top.v
+EOF
 
 # Optional DUT-only code/toggle collection (set env: COV_SCOPE=dut)
 COV_SCOPE="${COV_SCOPE:-all}"
@@ -69,7 +93,7 @@ VCS_CMD=(
   -full64
   -sverilog
   -ntb_opts uvm-1.2
-  -f /home/huhh/uvm_auto_regression/sim/work/filelist.f
+  -f "${FILELIST_PATH}"
   -top tb_uvm_top
   +UVM_TESTNAME=${TEST_NAME}
   ${SEED_OPT}
@@ -182,4 +206,8 @@ if [[ -f "${CDIR}/run_summarize.sh" ]]; then
 else
   echo "[ERR] missing post script: ${SCRIPT_DIR}/run_summarize.sh"
   exit 2
+fi
+
+if [[ "${RUN_STATUS:-FAIL}" != "PASS" ]]; then
+  exit 1
 fi
