@@ -11,7 +11,9 @@ set -euo pipefail
 TEST_NAME=${1:-i2c_smoke_test}
 SEED_ARG=${2:-}
 EXTRA_PLUSARGS=${3:-}
-CDIR=$(pwd)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
+CDIR="${SCRIPT_DIR}"
 RESULT_BASE="$CDIR/../sim_result"
 
 # Arg normalization:
@@ -51,6 +53,7 @@ LOG_FILE="${LOG_DIR}/${COV_RUN_NAME}.log"
 LATEST_LOG="${LOG_DIR}/${TEST_NAME}.log"
 RUN_WORK_DIR="${MISC_DIR}/work_${COV_RUN_NAME}_$$"
 mkdir -p "${RUN_WORK_DIR}"
+FILELIST_FILE="${RUN_WORK_DIR}/filelist.f"
 
 # Optional DUT-only code/toggle collection (set env: COV_SCOPE=dut)
 COV_SCOPE="${COV_SCOPE:-all}"
@@ -64,12 +67,33 @@ SEED_HIST_FILE="${LOG_DIR}/seed_history.log"
 echo "${SEED}" > "${SEED_FILE}"
 echo "$(date '+%F %T') test=${TEST_NAME} mode=${SEED_MODE} seed=${SEED}" >> "${SEED_HIST_FILE}"
 
+{
+  echo "+incdir+${REPO_ROOT}/sim/uvm/if"
+  echo "+incdir+${REPO_ROOT}/sim/uvm/item"
+  echo "+incdir+${REPO_ROOT}/sim/uvm/seq"
+  echo "+incdir+${REPO_ROOT}/sim/uvm/agent"
+  echo "+incdir+${REPO_ROOT}/sim/uvm/env"
+  echo "+incdir+${REPO_ROOT}/sim/uvm/test"
+  echo "+incdir+${REPO_ROOT}/sim/uvm/pkg"
+  echo "+incdir+${REPO_ROOT}/rtl"
+  echo
+  echo "${REPO_ROOT}/sim/uvm/if/i2c_if.sv"
+  echo "${REPO_ROOT}/sim/uvm/pkg/i2c_pkg.sv"
+  echo "${REPO_ROOT}/sim/tb/tb_uvm_top.sv"
+  echo
+  echo "${REPO_ROOT}/rtl/scl_sda_filter.v"
+  echo "${REPO_ROOT}/rtl/i2c_shift_reg.v"
+  echo "${REPO_ROOT}/rtl/reg_file.v"
+  echo "${REPO_ROOT}/rtl/i2c_rx_fsm.v"
+  echo "${REPO_ROOT}/rtl/i2c_slave_top.v"
+} > "${FILELIST_FILE}"
+
 VCS_CMD=(
   vcs
   -full64
   -sverilog
   -ntb_opts uvm-1.2
-  -f /home/huhh/uvm_auto_regression/sim/work/filelist.f
+  -f "${FILELIST_FILE}"
   -top tb_uvm_top
   +UVM_TESTNAME=${TEST_NAME}
   ${SEED_OPT}
@@ -183,3 +207,8 @@ else
   echo "[ERR] missing post script: ${SCRIPT_DIR}/run_summarize.sh"
   exit 2
 fi
+
+if [[ "${RUN_STATUS:-FAIL}" == "PASS" ]]; then
+  exit 0
+fi
+exit 1
