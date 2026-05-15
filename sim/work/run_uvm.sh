@@ -46,7 +46,7 @@ else
   SEED_MODE="auto"
 fi
 
-RUN_TAG="$(date +%Y%m%d_%H%M%S)"
+RUN_TAG="$(date +%Y%m%d_%H%M%S)_$$"
 COV_RUN_NAME="${RUN_TAG}_${SEED}"
 COV_RUN_DIR="${COV_DIR}/${COV_RUN_NAME}.cm"
 LOG_FILE="${LOG_DIR}/${COV_RUN_NAME}.log"

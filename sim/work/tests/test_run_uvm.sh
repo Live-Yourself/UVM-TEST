@@ -142,4 +142,10 @@ if ! grep -q ',i2c_smoke_test,123,fixed,PASS,' "${FAKE_REPO}/sim/sim_result/regr
   exit 1
 fi
 
+unique_logs=$(awk -F, 'NR>1{logs[$11]=1} END{print length(logs)}' "${FAKE_REPO}/sim/sim_result/regression_runs.csv")
+if [[ "${unique_logs}" -ne 2 ]]; then
+  echo "same-seed runs reused a log path" >&2
+  exit 1
+fi
+
 echo "test_run_uvm.sh: PASS"
