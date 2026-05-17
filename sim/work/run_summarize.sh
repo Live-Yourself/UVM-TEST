@@ -194,11 +194,7 @@ if [[ -n "${FSDB_FILE_PATH}" ]] && [[ -f "${FSDB_FILE_PATH}" ]]; then
   status_dir="$(echo "${RUN_STATUS}" | tr '[:upper:]' '[:lower:]')"
   fsdb_target_dir="${WAVE_DIR}/${status_dir}"
   mkdir -p "${fsdb_target_dir}"
-  if [[ "${RUN_STATUS}" == "PASS" ]]; then
-    FSDB_FILE_FINAL="${fsdb_target_dir}/${TEST_NAME}.fsdb"
-  else
-    FSDB_FILE_FINAL="${fsdb_target_dir}/$(basename "${FSDB_FILE_PATH}")"
-  fi
+  FSDB_FILE_FINAL="${fsdb_target_dir}/$(basename "${FSDB_FILE_PATH}")"
   mv "${FSDB_FILE_PATH}" "${FSDB_FILE_FINAL}" || FSDB_FILE_FINAL="${FSDB_FILE_PATH}"
 fi
 
@@ -352,4 +348,8 @@ if [[ -n "${FSDB_FILE_FINAL}" ]]; then
   echo "       fsdb: ${FSDB_FILE_FINAL}"
 else
   echo "       fsdb: ${WAVE_DIR}/<pass|fail>/${COV_RUN_NAME}.fsdb (if enabled)"
+fi
+
+if [[ "${RUN_STATUS}" != "PASS" ]]; then
+  exit 1
 fi

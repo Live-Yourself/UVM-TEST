@@ -11,8 +11,11 @@ set -euo pipefail
 TEST_NAME=${1:-i2c_smoke_test}
 SEED_ARG=${2:-}
 EXTRA_PLUSARGS=${3:-}
-CDIR=$(pwd)
-RESULT_BASE="$CDIR/../sim_result"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SIM_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+DEFAULT_RESULT_BASE="${SIM_ROOT}/sim_result"
+RESULT_BASE="${RESULT_BASE:-${DEFAULT_RESULT_BASE}}"
+FILELIST_TEMPLATE="${SCRIPT_DIR}/filelist.f"
 
 # Arg normalization:
 # If 2nd argument is not numeric, treat it as EXTRA_PLUSARGS rather than SEED.
@@ -45,12 +48,50 @@ else
 fi
 
 RUN_TAG="$(date +%Y%m%d_%H%M%S)"
-COV_RUN_NAME="${RUN_TAG}_${SEED}"
+COV_RUN_NAME="${RUN_TAG}_${SEED}_$$"
 COV_RUN_DIR="${COV_DIR}/${COV_RUN_NAME}.cm"
 LOG_FILE="${LOG_DIR}/${COV_RUN_NAME}.log"
 LATEST_LOG="${LOG_DIR}/${TEST_NAME}.log"
 RUN_WORK_DIR="${MISC_DIR}/work_${COV_RUN_NAME}_$$"
 mkdir -p "${RUN_WORK_DIR}"
+
+if [[ ! -f "${FILELIST_TEMPLATE}" ]]; then
+  echo "[ERR] missing filelist: ${FILELIST_TEMPLATE}"
+  exit 2
+fi
+
+abspath_from_script_dir() {
+  local path="$1"
+  if [[ "${path}" = /* ]]; then
+    printf '%s\n' "${path}"
+  else
+    realpath -m "${SCRIPT_DIR}/${path}"
+  fi
+}
+
+write_absolute_filelist() {
+  local src="$1"
+  local dst="$2"
+  local line
+  local incdir
+
+  : > "${dst}"
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ -z "${line}" || "${line}" =~ ^[[:space:]]*# ]]; then
+      printf '%s\n' "${line}" >> "${dst}"
+    elif [[ "${line}" == +incdir+* ]]; then
+      incdir="${line#+incdir+}"
+      printf '+incdir+%s\n' "$(abspath_from_script_dir "${incdir}")" >> "${dst}"
+    elif [[ "${line}" == -* || "${line}" == +* ]]; then
+      printf '%s\n' "${line}" >> "${dst}"
+    else
+      printf '%s\n' "$(abspath_from_script_dir "${line}")" >> "${dst}"
+    fi
+  done < "${src}"
+}
+
+FILELIST_ABS="${RUN_WORK_DIR}/filelist.abs.f"
+write_absolute_filelist "${FILELIST_TEMPLATE}" "${FILELIST_ABS}"
 
 # Optional DUT-only code/toggle collection (set env: COV_SCOPE=dut)
 COV_SCOPE="${COV_SCOPE:-all}"
@@ -69,7 +110,7 @@ VCS_CMD=(
   -full64
   -sverilog
   -ntb_opts uvm-1.2
-  -f /home/huhh/uvm_auto_regression/sim/work/filelist.f
+  -f "${FILELIST_ABS}"
   -top tb_uvm_top
   +UVM_TESTNAME=${TEST_NAME}
   ${SEED_OPT}
@@ -176,9 +217,9 @@ if [[ -s "${MERGE_LIST_FILE}" ]]; then
   "${URG_MERGE_CMD[@]}" || echo "[WARN] urg merged report failed"
 fi
 
-if [[ -f "${CDIR}/run_summarize.sh" ]]; then
+if [[ -f "${SCRIPT_DIR}/run_summarize.sh" ]]; then
   # shellcheck source=/dev/null
-  source "${CDIR}/run_summarize.sh"
+  source "${SCRIPT_DIR}/run_summarize.sh"
 else
   echo "[ERR] missing post script: ${SCRIPT_DIR}/run_summarize.sh"
   exit 2
