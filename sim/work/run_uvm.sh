@@ -11,8 +11,11 @@ set -euo pipefail
 TEST_NAME=${1:-i2c_smoke_test}
 SEED_ARG=${2:-}
 EXTRA_PLUSARGS=${3:-}
-CDIR=$(pwd)
-RESULT_BASE="$CDIR/../sim_result"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SIM_DIR=$(cd "${SCRIPT_DIR}/.." && pwd)
+CDIR="${SCRIPT_DIR}"
+RESULT_BASE="${SIM_DIR}/sim_result"
+FILELIST_SRC="${SCRIPT_DIR}/filelist.f"
 
 # Arg normalization:
 # If 2nd argument is not numeric, treat it as EXTRA_PLUSARGS rather than SEED.
@@ -44,13 +47,48 @@ else
   SEED_MODE="auto"
 fi
 
-RUN_TAG="$(date +%Y%m%d_%H%M%S)"
+RUN_TAG="$(date +%Y%m%d_%H%M%S)_$$"
 COV_RUN_NAME="${RUN_TAG}_${SEED}"
 COV_RUN_DIR="${COV_DIR}/${COV_RUN_NAME}.cm"
 LOG_FILE="${LOG_DIR}/${COV_RUN_NAME}.log"
 LATEST_LOG="${LOG_DIR}/${TEST_NAME}.log"
 RUN_WORK_DIR="${MISC_DIR}/work_${COV_RUN_NAME}_$$"
 mkdir -p "${RUN_WORK_DIR}"
+VCS_FILELIST="${RUN_WORK_DIR}/filelist_abs.f"
+
+abs_filelist_path() {
+  local path="$1"
+  if [[ "${path}" == /* ]]; then
+    printf '%s\n' "${path}"
+  else
+    printf '%s/%s\n' "$(cd "${SCRIPT_DIR}/$(dirname "${path}")" && pwd)" "$(basename "${path}")"
+  fi
+}
+
+abs_filelist_dir() {
+  local path="$1"
+  if [[ "${path}" == /* ]]; then
+    printf '%s\n' "${path}"
+  else
+    cd "${SCRIPT_DIR}/${path}" && pwd
+  fi
+}
+
+if [[ ! -f "${FILELIST_SRC}" ]]; then
+  echo "[ERR] missing filelist: ${FILELIST_SRC}"
+  exit 2
+fi
+
+while IFS= read -r line || [[ -n "${line}" ]]; do
+  if [[ "${line}" == +incdir+* ]]; then
+    incdir="${line#+incdir+}"
+    printf '+incdir+%s\n' "$(abs_filelist_dir "${incdir}")"
+  elif [[ -z "${line}" || "${line}" == /* || "${line}" == +* || "${line}" == -* ]]; then
+    printf '%s\n' "${line}"
+  else
+    abs_filelist_path "${line}"
+  fi
+done < "${FILELIST_SRC}" > "${VCS_FILELIST}"
 
 # Optional DUT-only code/toggle collection (set env: COV_SCOPE=dut)
 COV_SCOPE="${COV_SCOPE:-all}"
@@ -69,7 +107,7 @@ VCS_CMD=(
   -full64
   -sverilog
   -ntb_opts uvm-1.2
-  -f /home/huhh/uvm_auto_regression/sim/work/filelist.f
+  -f "${VCS_FILELIST}"
   -top tb_uvm_top
   +UVM_TESTNAME=${TEST_NAME}
   ${SEED_OPT}
@@ -180,6 +218,12 @@ if [[ -f "${CDIR}/run_summarize.sh" ]]; then
   # shellcheck source=/dev/null
   source "${CDIR}/run_summarize.sh"
 else
-  echo "[ERR] missing post script: ${SCRIPT_DIR}/run_summarize.sh"
+  echo "[ERR] missing post script: ${CDIR}/run_summarize.sh"
   exit 2
 fi
+
+if [[ "${RUN_STATUS:-FAIL}" == "PASS" ]]; then
+  exit 0
+fi
+
+exit 1
