@@ -224,7 +224,8 @@ module i2c_rx_fsm (
                 tx_shift_en = scl_fall;
             end
             ST_READ_ACK: begin
-                tx_drive_en = scl_sync;
+                // Release SDA so the master can drive ACK/NACK after a read byte.
+                tx_drive_en = 1'b0;
             end
             default: begin
             end

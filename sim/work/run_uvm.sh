@@ -11,8 +11,9 @@ set -euo pipefail
 TEST_NAME=${1:-i2c_smoke_test}
 SEED_ARG=${2:-}
 EXTRA_PLUSARGS=${3:-}
-CDIR=$(pwd)
-RESULT_BASE="$CDIR/../sim_result"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+CDIR="${SCRIPT_DIR}"
+RESULT_BASE="${SCRIPT_DIR}/../sim_result"
 
 # Arg normalization:
 # If 2nd argument is not numeric, treat it as EXTRA_PLUSARGS rather than SEED.
@@ -45,12 +46,41 @@ else
 fi
 
 RUN_TAG="$(date +%Y%m%d_%H%M%S)"
-COV_RUN_NAME="${RUN_TAG}_${SEED}"
+COV_RUN_NAME="${RUN_TAG}_$(date +%N)_$$_${SEED}"
 COV_RUN_DIR="${COV_DIR}/${COV_RUN_NAME}.cm"
 LOG_FILE="${LOG_DIR}/${COV_RUN_NAME}.log"
 LATEST_LOG="${LOG_DIR}/${TEST_NAME}.log"
 RUN_WORK_DIR="${MISC_DIR}/work_${COV_RUN_NAME}_$$"
 mkdir -p "${RUN_WORK_DIR}"
+
+FILELIST_SRC="${SCRIPT_DIR}/filelist.f"
+FILELIST_ABS="${RUN_WORK_DIR}/filelist.abs.f"
+if [[ ! -f "${FILELIST_SRC}" ]]; then
+  echo "[ERR] missing filelist: ${FILELIST_SRC}"
+  exit 2
+fi
+
+while IFS= read -r line || [[ -n "${line}" ]]; do
+  case "${line}" in
+    ""|\#*)
+      echo "${line}"
+      ;;
+    +incdir+*)
+      inc_path="${line#+incdir+}"
+      if [[ "${inc_path}" == /* ]]; then
+        echo "${line}"
+      else
+        echo "+incdir+${SCRIPT_DIR}/${inc_path}"
+      fi
+      ;;
+    /*|+*|-*)
+      echo "${line}"
+      ;;
+    *)
+      echo "${SCRIPT_DIR}/${line}"
+      ;;
+  esac
+done < "${FILELIST_SRC}" > "${FILELIST_ABS}"
 
 # Optional DUT-only code/toggle collection (set env: COV_SCOPE=dut)
 COV_SCOPE="${COV_SCOPE:-all}"
@@ -69,7 +99,7 @@ VCS_CMD=(
   -full64
   -sverilog
   -ntb_opts uvm-1.2
-  -f /home/huhh/uvm_auto_regression/sim/work/filelist.f
+  -f "${FILELIST_ABS}"
   -top tb_uvm_top
   +UVM_TESTNAME=${TEST_NAME}
   ${SEED_OPT}
@@ -162,6 +192,16 @@ if [[ "${VCS_RC}" -eq 0 ]] && [[ -d "${COV_RUN_DIR}.vdb" ]]; then
 fi
 
  
+RESULT_LOCKED=0
+if command -v flock >/dev/null 2>&1; then
+  RESULT_LOCK_FILE="${RESULT_BASE}/.run_uvm_results.lock"
+  exec {RESULT_LOCK_FD}>"${RESULT_LOCK_FILE}"
+  flock "${RESULT_LOCK_FD}"
+  RESULT_LOCKED=1
+else
+  echo "[WARN] flock not found; regression result updates are not serialized"
+fi
+
 # Merge all test coverage DBs into one consolidated report under sim_result
 MERGE_REPORT_DIR="${RESULT_BASE}/Cov_Report_All"
 MERGE_LIST_FILE="${RESULT_BASE}/merged_cov_inputs.txt"
@@ -181,5 +221,17 @@ if [[ -f "${CDIR}/run_summarize.sh" ]]; then
   source "${CDIR}/run_summarize.sh"
 else
   echo "[ERR] missing post script: ${SCRIPT_DIR}/run_summarize.sh"
+  if [[ "${RESULT_LOCKED}" -eq 1 ]]; then
+    flock -u "${RESULT_LOCK_FD}"
+  fi
   exit 2
 fi
+
+if [[ "${RESULT_LOCKED}" -eq 1 ]]; then
+  flock -u "${RESULT_LOCK_FD}"
+fi
+
+if [[ "${RUN_STATUS:-FAIL}" == "PASS" ]]; then
+  exit 0
+fi
+exit 1
