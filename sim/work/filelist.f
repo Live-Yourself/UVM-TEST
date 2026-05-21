@@ -1,18 +1,18 @@
-+incdir+/home/huhh/uvm_auto_regression/sim/uvm/if
-+incdir+/home/huhh/uvm_auto_regression/sim/uvm/item
-+incdir+/home/huhh/uvm_auto_regression/sim/uvm/seq
-+incdir+/home/huhh/uvm_auto_regression/sim/uvm/agent
-+incdir+/home/huhh/uvm_auto_regression/sim/uvm/env
-+incdir+/home/huhh/uvm_auto_regression/sim/uvm/test
-+incdir+/home/huhh/uvm_auto_regression/sim/uvm/pkg
-+incdir+/home/huhh/uvm_auto_regression/rtl
++incdir+sim/uvm/if
++incdir+sim/uvm/item
++incdir+sim/uvm/seq
++incdir+sim/uvm/agent
++incdir+sim/uvm/env
++incdir+sim/uvm/test
++incdir+sim/uvm/pkg
++incdir+rtl
 
-/home/huhh/uvm_auto_regression/sim/uvm/if/i2c_if.sv
-/home/huhh/uvm_auto_regression/sim/uvm/pkg/i2c_pkg.sv
-/home/huhh/uvm_auto_regression/sim/tb/tb_uvm_top.sv
+sim/uvm/if/i2c_if.sv
+sim/uvm/pkg/i2c_pkg.sv
+sim/tb/tb_uvm_top.sv
 
-/home/huhh/uvm_auto_regression/rtl/scl_sda_filter.v
-/home/huhh/uvm_auto_regression/rtl/i2c_shift_reg.v
-/home/huhh/uvm_auto_regression/rtl/reg_file.v
-/home/huhh/uvm_auto_regression/rtl/i2c_rx_fsm.v
-/home/huhh/uvm_auto_regression/rtl/i2c_slave_top.v
+rtl/scl_sda_filter.v
+rtl/i2c_shift_reg.v
+rtl/reg_file.v
+rtl/i2c_rx_fsm.v
+rtl/i2c_slave_top.v
