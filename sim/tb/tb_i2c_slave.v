@@ -119,7 +119,14 @@ module tb_i2c_slave;
                 i2c_read_bit(bit_val);
                 data[i] = bit_val;
             end
-            i2c_write_bit(~ack); // drive ACK=0, NACK=1
+            i2c_scl_low();
+            sda_drv = ack ? 1'b0 : 1'b1; // ACK=0, NACK=1
+            #(T_LOW/4);
+            i2c_scl_high();
+            if (!ack && sda !== 1'b1) begin
+                $fatal(1, "[%0t] TB: slave did not release SDA for read NACK", $time);
+            end
+            i2c_scl_low();
         end
     endtask
 

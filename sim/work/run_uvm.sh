@@ -11,8 +11,9 @@ set -euo pipefail
 TEST_NAME=${1:-i2c_smoke_test}
 SEED_ARG=${2:-}
 EXTRA_PLUSARGS=${3:-}
-CDIR=$(pwd)
-RESULT_BASE="$CDIR/../sim_result"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+RESULT_BASE="${SCRIPT_DIR}/../sim_result"
 
 # Arg normalization:
 # If 2nd argument is not numeric, treat it as EXTRA_PLUSARGS rather than SEED.
@@ -45,12 +46,40 @@ else
 fi
 
 RUN_TAG="$(date +%Y%m%d_%H%M%S)"
-COV_RUN_NAME="${RUN_TAG}_${SEED}"
+COV_RUN_NAME="${RUN_TAG}_${SEED}_$$"
 COV_RUN_DIR="${COV_DIR}/${COV_RUN_NAME}.cm"
 LOG_FILE="${LOG_DIR}/${COV_RUN_NAME}.log"
 LATEST_LOG="${LOG_DIR}/${TEST_NAME}.log"
-RUN_WORK_DIR="${MISC_DIR}/work_${COV_RUN_NAME}_$$"
+RUN_WORK_DIR="${MISC_DIR}/work_${COV_RUN_NAME}"
 mkdir -p "${RUN_WORK_DIR}"
+
+FILELIST_RUN="${RUN_WORK_DIR}/filelist.f"
+{
+  for incdir in \
+    sim/uvm/if \
+    sim/uvm/item \
+    sim/uvm/seq \
+    sim/uvm/agent \
+    sim/uvm/env \
+    sim/uvm/test \
+    sim/uvm/pkg \
+    rtl; do
+    echo "+incdir+${REPO_ROOT}/${incdir}"
+  done
+
+  echo
+  for src in \
+    sim/uvm/if/i2c_if.sv \
+    sim/uvm/pkg/i2c_pkg.sv \
+    sim/tb/tb_uvm_top.sv \
+    rtl/scl_sda_filter.v \
+    rtl/i2c_shift_reg.v \
+    rtl/reg_file.v \
+    rtl/i2c_rx_fsm.v \
+    rtl/i2c_slave_top.v; do
+    echo "${REPO_ROOT}/${src}"
+  done
+} > "${FILELIST_RUN}"
 
 # Optional DUT-only code/toggle collection (set env: COV_SCOPE=dut)
 COV_SCOPE="${COV_SCOPE:-all}"
@@ -69,7 +98,7 @@ VCS_CMD=(
   -full64
   -sverilog
   -ntb_opts uvm-1.2
-  -f /home/huhh/uvm_auto_regression/sim/work/filelist.f
+  -f "${FILELIST_RUN}"
   -top tb_uvm_top
   +UVM_TESTNAME=${TEST_NAME}
   ${SEED_OPT}
@@ -176,10 +205,15 @@ if [[ -s "${MERGE_LIST_FILE}" ]]; then
   "${URG_MERGE_CMD[@]}" || echo "[WARN] urg merged report failed"
 fi
 
-if [[ -f "${CDIR}/run_summarize.sh" ]]; then
+if [[ -f "${SCRIPT_DIR}/run_summarize.sh" ]]; then
   # shellcheck source=/dev/null
-  source "${CDIR}/run_summarize.sh"
+  source "${SCRIPT_DIR}/run_summarize.sh"
 else
   echo "[ERR] missing post script: ${SCRIPT_DIR}/run_summarize.sh"
   exit 2
 fi
+
+if [[ "${RUN_STATUS:-FAIL}" == "PASS" ]]; then
+  exit 0
+fi
+exit 1
