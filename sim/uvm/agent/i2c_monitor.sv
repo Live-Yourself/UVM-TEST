@@ -150,8 +150,6 @@ class i2c_monitor extends uvm_component;
           mon_stop_cnt++;
           if (in_frame)
             decode_and_publish();
-          // STOP terminates transaction context; clear deferred pointer.
-          pending_reg_valid = 1'b0;
           in_frame = 1'b0;
           bit_pos = 0;
           cur_byte = 8'h00;

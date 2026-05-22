@@ -11,8 +11,8 @@ set -euo pipefail
 TEST_NAME=${1:-i2c_smoke_test}
 SEED_ARG=${2:-}
 EXTRA_PLUSARGS=${3:-}
-CDIR=$(pwd)
-RESULT_BASE="$CDIR/../sim_result"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+RESULT_BASE="$SCRIPT_DIR/../sim_result"
 
 # Arg normalization:
 # If 2nd argument is not numeric, treat it as EXTRA_PLUSARGS rather than SEED.
@@ -45,12 +45,42 @@ else
 fi
 
 RUN_TAG="$(date +%Y%m%d_%H%M%S)"
-COV_RUN_NAME="${RUN_TAG}_${SEED}"
+COV_RUN_NAME="${RUN_TAG}_${SEED}_$$"
 COV_RUN_DIR="${COV_DIR}/${COV_RUN_NAME}.cm"
 LOG_FILE="${LOG_DIR}/${COV_RUN_NAME}.log"
 LATEST_LOG="${LOG_DIR}/${TEST_NAME}.log"
-RUN_WORK_DIR="${MISC_DIR}/work_${COV_RUN_NAME}_$$"
+RUN_WORK_DIR="${MISC_DIR}/work_${COV_RUN_NAME}"
 mkdir -p "${RUN_WORK_DIR}"
+
+FILELIST_TEMPLATE="${SCRIPT_DIR}/filelist.f"
+VCS_FILELIST="${RUN_WORK_DIR}/filelist_${COV_RUN_NAME}.f"
+if [[ ! -f "${FILELIST_TEMPLATE}" ]]; then
+  echo "[ERR] missing VCS filelist template: ${FILELIST_TEMPLATE}"
+  exit 2
+fi
+
+python3 - "${FILELIST_TEMPLATE}" "${VCS_FILELIST}" "${SCRIPT_DIR}" <<'PY'
+import os
+import sys
+
+src, dst, base = sys.argv[1:4]
+
+def resolve_path(path):
+    return path if os.path.isabs(path) else os.path.abspath(os.path.join(base, path))
+
+with open(src, "r", encoding="utf-8") as fin, open(dst, "w", encoding="utf-8") as fout:
+    for raw in fin:
+        line = raw.rstrip("\n")
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("//"):
+            fout.write(raw)
+        elif line.startswith("+incdir+"):
+            fout.write("+incdir+" + resolve_path(line[len("+incdir+"):]) + "\n")
+        elif line.startswith("+") or line.startswith("-"):
+            fout.write(line + "\n")
+        else:
+            fout.write(resolve_path(line) + "\n")
+PY
 
 # Optional DUT-only code/toggle collection (set env: COV_SCOPE=dut)
 COV_SCOPE="${COV_SCOPE:-all}"
@@ -69,7 +99,7 @@ VCS_CMD=(
   -full64
   -sverilog
   -ntb_opts uvm-1.2
-  -f /home/huhh/uvm_auto_regression/sim/work/filelist.f
+  -f "${VCS_FILELIST}"
   -top tb_uvm_top
   +UVM_TESTNAME=${TEST_NAME}
   ${SEED_OPT}
@@ -165,6 +195,14 @@ fi
 # Merge all test coverage DBs into one consolidated report under sim_result
 MERGE_REPORT_DIR="${RESULT_BASE}/Cov_Report_All"
 MERGE_LIST_FILE="${RESULT_BASE}/merged_cov_inputs.txt"
+POST_LOCK_HELD=0
+POST_LOCK="${RESULT_BASE}/.run_post.lock"
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"${POST_LOCK}"
+  flock 9
+  POST_LOCK_HELD=1
+fi
+
 find "${RESULT_BASE}" -type d -name "*.cm.vdb" | sort > "${MERGE_LIST_FILE}"
 
 if [[ -s "${MERGE_LIST_FILE}" ]]; then
@@ -176,10 +214,18 @@ if [[ -s "${MERGE_LIST_FILE}" ]]; then
   "${URG_MERGE_CMD[@]}" || echo "[WARN] urg merged report failed"
 fi
 
-if [[ -f "${CDIR}/run_summarize.sh" ]]; then
+if [[ -f "${SCRIPT_DIR}/run_summarize.sh" ]]; then
   # shellcheck source=/dev/null
-  source "${CDIR}/run_summarize.sh"
+  source "${SCRIPT_DIR}/run_summarize.sh"
 else
   echo "[ERR] missing post script: ${SCRIPT_DIR}/run_summarize.sh"
   exit 2
+fi
+
+if [[ "${POST_LOCK_HELD}" -eq 1 ]]; then
+  flock -u 9
+fi
+
+if [[ "${RUN_STATUS:-FAIL}" != "PASS" ]]; then
+  exit 1
 fi
