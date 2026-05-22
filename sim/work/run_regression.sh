@@ -157,6 +157,18 @@ await_slot() {
   done
 }
 
+append_summary_row() {
+  local row="$1"
+  if command -v flock >/dev/null 2>&1; then
+    (
+      flock 8
+      echo "${row}" >> "${SUMMARY_CSV}"
+    ) 8>"${SUMMARY_CSV}.lock"
+  else
+    echo "${row}" >> "${SUMMARY_CSV}"
+  fi
+}
+
 run_one() {
   local cid="$1" test_name="$2" seed_val="$3" extra_args="$4" mon_sampled="$5"
   local status="PASS"
@@ -232,7 +244,7 @@ run_one() {
 
   echo "[REG][CASE ${cid}] DONE status=${status}"
 
-  echo "${cid},${test_name},${seed_val},${extra_args},${status},${case_log},${start_ts},${end_ts},${mon_sampled}" >> "${SUMMARY_CSV}"
+  append_summary_row "${cid},${test_name},${seed_val},${extra_args},${status},${case_log},${start_ts},${end_ts},${mon_sampled}"
 }
 
 while IFS= read -r line || [[ -n "$line" ]]; do
