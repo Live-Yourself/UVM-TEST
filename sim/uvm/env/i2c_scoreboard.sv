@@ -234,6 +234,13 @@ class i2c_scoreboard extends uvm_component;
       default: ;
     endcase
 
+    if (tr.ack_bits.size() > 0) begin
+      if (legal_i && !tr.ack_bits[0])
+        `uvm_error("SCB", $sformatf("[%s] legal addr 0x%02h must ACK on address phase", src, tr.dev_addr))
+      else if (!legal_i && tr.ack_bits[0])
+        `uvm_error("SCB", $sformatf("[%s] illegal addr 0x%02h must NACK on address phase", src, tr.dev_addr))
+    end
+
     if (is_read_i && !legal_i)
       hit_illegal_read = 1'b1;
 

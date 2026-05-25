@@ -224,7 +224,8 @@ module i2c_rx_fsm (
                 tx_shift_en = scl_fall;
             end
             ST_READ_ACK: begin
-                tx_drive_en = scl_sync;
+                // Master owns the read ACK/NACK bit; release SDA.
+                tx_drive_en = 1'b0;
             end
             default: begin
             end
