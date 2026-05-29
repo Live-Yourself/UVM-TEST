@@ -1,6 +1,9 @@
 # Nightly stress list
 # format: <test_name> [seed] [extra_plusargs...]
 
+# usage:
+# 	bash run_regression.sh -l nightly.list -j <parallel> -r <repeat> --nightly
+
 i2c_smoke_test
 i2c_cov_closure_test
 i2c_illegal_addr_test

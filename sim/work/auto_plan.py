@@ -139,7 +139,10 @@ def seed_gen():
     return random.randint(1, 2147483646)
 
 
-def load_stats(run_db):
+def load_stats(run_db, result_base=None):
+    """Load regression statistics from run_db.
+    Also calculate global cumulative coverage from global bucket hit files.
+    """
     stats = defaultdict(TestStat)
     if not os.path.exists(run_db):
         return stats
@@ -158,6 +161,7 @@ def load_stats(run_db):
             elif status == "FAIL":
                 s.failed += 1
 
+            # Use latest cumulative fcov (which is computed from global bucket hits)
             fc = row.get("func_cov", "").strip()
             try:
                 v = float(fc)
@@ -166,6 +170,22 @@ def load_stats(run_db):
                 s.latest_cov = v
             except Exception:
                 pass
+    
+    # Calculate global cumulative coverage (override single-run average with true cumulative)
+    if result_base and os.path.exists(os.path.join(result_base, "global_buckets_v1.txt")):
+        try:
+            with open(os.path.join(result_base, "global_buckets_v1.txt"), "r") as f:
+                v1_hit = len([l for l in f if l.strip()])
+            with open(os.path.join(result_base, "global_buckets_v2.txt"), "r") as f:
+                v2_hit = len([l for l in f if l.strip()])
+            total_buckets = 14  # 7 V1 buckets + 7 V2 buckets
+            global_cov = (v1_hit + v2_hit) * 100.0 / total_buckets if total_buckets > 0 else 0.0
+            # Store as a synthetic test stat for reference
+            stats["__global_cumulative_cov"] = TestStat()
+            stats["__global_cumulative_cov"].latest_cov = global_cov
+        except Exception as e:
+            print("Warning: could not load global bucket coverage: {}".format(e))
+    
     return stats
 
 
@@ -528,7 +548,7 @@ def main():
     bucket_db = os.path.join(result_base, "coverage_buckets.csv")
     bucket2_db = os.path.join(result_base, "coverage_buckets_v2.csv")
 
-    stats = load_stats(run_db)
+    stats = load_stats(run_db, result_base)
     fail_top = load_failure_top(fail_db)
     bucket = load_bucket_stats(bucket_db)
     bucket2 = load_bucket2_stats(bucket2_db)

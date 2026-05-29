@@ -1,0 +1,5 @@
+`include "../../rtl/i2c_rx_fsm.v"
+`include "../../rtl/i2c_shift_reg.v"
+`include "../../rtl/reg_file.v"
+`include "../../rtl/scl_sda_filter.v"
+`include "../../rtl/i2c_slave_top.v"

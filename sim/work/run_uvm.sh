@@ -56,7 +56,6 @@ mkdir -p "${RUN_WORK_DIR}"
 COV_SCOPE="${COV_SCOPE:-all}"
 COV_SCOPE_INFO="all"
 
-SEED_OPT="+ntb_random_seed=${SEED}"
 SEED_INFO="${SEED_MODE}(${SEED})"
 SEED_FILE="${LOG_DIR}/${TEST_NAME}.seed"
 SEED_HIST_FILE="${LOG_DIR}/seed_history.log"
@@ -69,10 +68,10 @@ VCS_CMD=(
   -full64
   -sverilog
   -ntb_opts uvm-1.2
-  -f /home/huhh/uvm_auto_regression/sim/work/filelist.f
+  -f /home/huhh/UVM_Module_v1.0/sim/work/filelist.f
   -top tb_uvm_top
   +UVM_TESTNAME=${TEST_NAME}
-  ${SEED_OPT}
+  +ntb_random_seed=${SEED}
   -timescale=1ns/1ps
   -debug_access+all -kdb -lca
   -cm line+cond+fsm+tgl+branch
@@ -183,3 +182,4 @@ else
   echo "[ERR] missing post script: ${SCRIPT_DIR}/run_summarize.sh"
   exit 2
 fi
+

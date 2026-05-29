@@ -18,3 +18,4 @@ if [[ -f "$FSDB_PATH" ]]; then
 fi
 
 "${CMD[@]}"
+

@@ -11,7 +11,6 @@
 #       Date          Mod.By           Change made
 #       ===================================================
 #       June. 10,2019   David Zhao       Initial version
-#       March. 02,2026  Copilot          Update for typical target + OCs
 #********************************************************************
 
 # set search path
@@ -38,9 +37,8 @@ set STDCELL_LIBRARY_SLOW [format "%s%s"  $STDCELL_LIBDIR /sc7_logic018ll_base_rv
 # set STDCELL_LIBNAME_SLOW ss_typ_max_1p62v_125c
 set STDCELL_LIBNAME_SLOW sc7_logic018ll_base_rvt_ss_typ_max_1p62v_125c
 
-# Use typical as target for synthesis
-set STDCELL_LIBRARY $STDCELL_LIBRARY_TYPICAL
-set STDCELL_LIBNAME $STDCELL_LIBNAME_TYPICAL
+set STDCELL_LIBRARY $STDCELL_LIBRARY_TYPICAL 
+set STDCELL_LIBNAME $STDCELL_LIBRARY_TYPICAL
 
 #set EFUSE_LIBRARY_FAST [format "%s%s"  $EFUSE_LIBDIR /S0153GEFUSE_PIPO512B_V0.2.1_ff_V1p98_-40C_201312SP57.db]
 #set EFUSE_LIBNAME_FAST S0153GEFUSE_PIPO512B_V0.2.1_ff_V1p98_-40C
@@ -63,7 +61,6 @@ set target_library  [list $STDCELL_LIBRARY ]
 
 set link_library [list "*" $target_library ]
 
-# Min/Max library for timing
 set_min_library $STDCELL_LIBRARY_SLOW -min_version $STDCELL_LIBRARY_FAST
 
 #set_dont_use [find cell [format "%s%s"   $STDCELL_LIBNAME  "/*"   ]]

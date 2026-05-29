@@ -1,0 +1,587 @@
+ARM, Inc.
+
+SMIC 180LL(180nm with LDMOS) RVT Process SC7 Ultra High Density Standard Cell Library
+Release Notes
+===============================================================================
+r0p0-01eac0 (03/12/10)
+
+
+This section describes the impact of this release on current designs
+which are using the previous release.
+
+     *** This is a mandatory update. ***
+
+ARM Update Recommendation:
+
+Install version r0p0-01eac0 , Discontinue using r0p0-00eac0
+
+Impact of this Release on Major Library Components:
+ 
+  o Timing views (lib/db) have been updated with this release.
+  	-FILLCAP* Cells have been re-characterize to have correct capacitance trend.
+
+  o Datasheet has been updated.    
+  o No impact to other views with this release.
+
+  Process Technology Data
+-----------------------
+This section lists all of the foundry documents and technology files used
+to design this product.
+
+    o Process Name
+        - SMIC 180LL(180nm with LDMOS) PROCESS
+
+    o Design Rule Document
+        - TD-LD18-DR-2001v2T, Rev 2T,  March 01,2010
+    
+    o GDS Layer Usage Description File
+        - SmicVTMP_LO_SRAM_MR_MM_HV_LC_018, Rev 2.7, September 08,2009 
+
+    o DRC Command File
+        - Calibre DRC Command File
+          SmicDR2T_calDRC018_LDMOS_sali_p1mtx_186016_specialCTM,Rev 1.2.b,June 10,2010
+        
+    o LVS Command File
+        - Calibre LVS Command File
+		SmicSP1T_cal018_LDMOS_sali_plmtx_1860160, Rev 1.1, March 01,2010
+	- Hercules LVS Command File(For Extraction)
+		SmicSP1T_starRCXT018_LDMOS_sali_plmtx_1860160, Rev 0.3, March 01,2010
+
+    o HSpice model File
+	- hv018_v0p2.lib, Rev 0.2, October 26,2009 
+	  
+         	
+    o Extractor Technology File
+         SmicSP1T_starRCXT018_LDMOS_sali_plmtx_1860160	Rev 0.3, September 30,2010
+
+EDA Views
+---------
+This section lists the EDA tools and versions supported for this product release.
+The items indicated by the "*" were used during the QA testing of this release.
+The items indicated by the "**" are exception to ARM EDA package 6.2 and used in QA testing.
+The items indicated by the "o" are not used during the QA testing but supported. 
+
+    * Cadence NC-Sim (Verilog)
+        - 6.2
+    * Synopsys VCS (Verilog)
+        - 2006.06
+    * Mentor ModelSim (Verilog)
+        - 6.3
+    * Synopsys Design Compiler
+        - 2007.12
+    o Synopsys Module Compiler 
+        - 2007.12
+    * Cadence RTL Compiler (.lib)
+        - 8.1
+    * Synopsys PrimeTime (.lib/.db)
+        - 2007.12
+    o Synopsys Power Compiler
+        - 2007.12
+    o Synopsys PrimePower/PrimeTime PX
+        - 2007.12
+    o Synopsys JupiterXT (Design Planning)
+        - 2007.12
+    o Cadence SoC Encounter/First Encounter (Design Planning)
+        - 7.1
+    * Cadence SoC Encounter/NanoRoute (Place & Route)
+        - 7.1
+    * Synopsys ICC
+        - 2007.12
+    o Synopsys DFT Compiler
+        - 2007.12
+    * Cadence Composer (schematic entry)
+        - 5.1.41
+    * Adobe Acrobat Reader (PDF Documentation)
+        - 5.0
+    * Synopsys HSPICE 
+        - 2009.09
+    * Synopsys Library Compiler 
+        - 2007.12-SP5
+    * Synopsys Hercules (For Extraction)
+       	- 2006.12-sp2-7
+    * Synopsys Starrcxt
+    	- 2007.12-SP1
+    * Mentor Graphics Calibre (GDSII, CDL)
+        - 2007.2_34.24
+   ** Synopsys TetraMax
+        - 2009.06
+    * Synopsys Milkyway 
+        - 2007.12
+    * Synopsys Formality
+        - 2009.06	
+    * Cadence Conformal
+        - 8.10.400
+    * Cadence ETS 
+        - 8.1
+    * Magma Talus
+        - 1.0.80
+
+Technology Implementation
+-------------------------
+This section provides information on items that may not be included in the
+foundry documentation.
+
+Timing and power views characterized at the following conditions:
+ 
+ 1.8 Volt Domain:
+
+    sc7_logic018ll_base_rvt_ss_typ_max_1p62v_125c - Slow N18_DNW, Slow P18_DNW,
+         typical extraction, Maximum overlay, 1.62V supply,
+         125C temperature
+
+    sc7_logic018ll_base_rvt_tt_typ_max_1p80v_25c  - Typical N18_DNW, Typical P18_DNW,
+         typical extraction, Maximum overlay, 1.80V supply,
+         25C temperature
+
+    sc7_logic018ll_base_rvt_ff_typ_min_1p98v_m40c - Fast N18_DNW, Fast P18_DNW, 
+         typical extraction, Minimum overlay, 1.98V supply,
+         -40C temperature
+
+    
+    Mandatory Tapeout layers required for foundry:
+
+         - GDS2 text layer 63:63 is allocated by foundry for IP marking.
+	 - GDS2 text layer 30:0 is allocated by foundry for IP marking.
+	 - GDS2 text layer 10:0 is allocated by foundry for IP marking.
+	  *** These are mandatory tapeout layers ****
+   
+ 
+Methodology
+-----------
+This section describes design issues that may be applicable to
+this release.
+
+
+   o Calibre DRC options
+
+    	BEOL_STACK ML5
+	POLY_RESISTOR_RULE yes
+	setenv SLOT_RULE yes
+	setenv DENSITY_CHECK TRUE
+
+    o Calibre LVS options
+        BEOL_STACK ML5
+	RES_MODEL R
+	SPLIT_GATE yes
+	INSTANCE 1
+	VIRTUAL_CONNECT no
+	BASIC_ERC no
+	ALL_ERC yes
+
+   o  Hercules LVS options (for extraction)
+   	HERCTOPLM 5
+	ERCCHECK TRUE
+	RES_MODEL R
+	STARRCXT TRUE
+	VIRTUAL_CONNECT no
+	OUTPUT_GRAPHICS FALSE
+	CASE_SENSITIVE yes
+	COMPARE_PROPERTIES TRUE
+	INSTANCE 0
+	VIRTUAL_CONNECT_NAMES VNW, VPW, VDD, VSS
+
+
+   o StarRCXT options :
+
+	REMOVE_FLOATING_NETS: YES
+	MILKYWAY_EXTRACT_VIEW: YES
+	TRANSLATE_RETAIN_BULK_LAYERS: YES
+	CASE_SENSITIVE: NO
+	EXTRACTION: RC
+	COUPLE_TO_GROUND: NO
+	COUPLING_MULTIPLIER: 1
+	IGNORE_CAPACITANCE: ALL
+	COUPLING_ABS_THRESHOLD: 1.0e-18
+	COUPLING_REL_THRESHOLD: 0.03
+	MODE: 400
+	SKIP_CELLS: !*
+	NETS: * !VNW !VPW
+	POWER_NETS: VDD VSS DVDD DVSS RVDD RVSS VDDE VSSE VSSC VSSP VDDPE VDDCE VDDC VDDP
+	POWER_EXTRACT: YES
+	XREF: YES
+	NET_TYPE: SCHEMATIC
+	CELL_TYPE: SCHEMATIC
+	NETLIST_FORMAT: NETNAME
+	REMOVE_DANGLING_NETS: YES
+	REDUCTION: YES
+	NETLIST_INSTANCE_SECTION: YES
+	NETLIST_GROUND_NODE_NAME: VSS
+	NETLIST_PASSIVE_PARAMS: YES
+	EXTRACT_VIA_CAPS: YES
+	NETLIST_NODENAME_NETNAME:           YES
+	TCAD_GRD_FILE: SmicSP1T_018_LDMOS_p1mt5_tran_typ.nxtgrd
+	MAPPING_FILE: SmicSP1T_her018_LDMOS_sali_plmt5_tran_1860160.map
+
+  
+  
+   o DRC of Individual cells (Calibre):
+
+   	o Following cell will fail for RULECHECK: AA_8
+	  FILL1_A7TR
+	  
+	   FILL1 is a one track wide cell.This DRC violation
+	   is on Individual cell.This rule violation would go away 
+	   in Block level.
+
+	o Few cells would fail for folliwing DRC rules.
+	  These are DRC violations on Individual cell. But these
+	  violations would go away in Block level when cells are
+	  abutted together.
+
+	  PD_GT (Min. Poly GDS pattern density)
+          PD_M1 (Min. Metal 1 GDS pattern density)
+
+   o LVS of Individual cells (Calibre):
+
+       ANTENNA_A7TR will fail cell level lvs
+       clean at chip level (when abutted with the FILLTIE).
+
+
+     DRC of Place and Route test cases:
+     -------------------------------------
+    
+       o Orientation & Placement of Triple well Specific cells
+   
+         All the cells in this library has DeepNwell Layer (DNW)
+         Following Placement is needed to avoid DRC errors needed to have
+         DNW shape and Nwell shape in the block level.
+      
+     	 - ENDCAPTIE11_A7TR cell to be placed in both left and right edges of the Block 
+           (with topmost row and left side without any flipping.)
+         - Top-most row to be placed with no vertical Flipping.
+       	   ie., VDD rail to face the North Orientation.
+     	 - Bottom-most row to be placed with vertical Flipping.
+           ie., VDD rail to face the South Orientation.   
+
+
+ 
+Known Problems and Solutions
+----------------------------
+This section describes known problems and work-arounds as of the release
+date of this library.
+
+    o All the cell will flag for following DRC
+      (SMIC has agreed to relax these rules in the upcoming DRC deck)
+     		DNW_9 : Minimum space from a NW edge to a N+AA outside surrounding NW when DNW is implemented is 0.5
+		
+    o Few cells would fail for following rules 
+      (SMIC has agreed to update these rules in the upcoming DRC deck)
+    		PW_1 : Minimum width of an PW region is 0.86um.
+
+    o Few cells would fail for following rules (Metal SLOT rules)
+      (SMIC has agreed to update these rules in the upcoming DRC deck)
+		 
+		SLOT_1_a  : Minimum slot dimension for each metal layers is 2.0
+		SLOT_2_a  : Minimum slot enclosure by metal is 5.0
+		SLOT_3a_a : Minimum space between slots is 2.0
+
+
+    o The following warning message will be reported when the Liberty files are read into RTL Compiler: 
+        - Warning : Improperly defined 'leakage_power' group. [LBR-150]:   
+                     The 'related_pg_pin' attribute value 'VDD*' in 'leakage_power' group
+        - Cadence has fixed this issue in 9.1.100 release
+          Cadence has confirmed that this warning will not have any impact on the calculation
+	  of leakage power and no impact on reporting power.For leakage power calculations and
+	  effect on RC by this Warning, please see if the pg_pin group is defined later than its 
+	  usage, then warning can be ignored.
+	
+    o Encounter could flag the following Warning for the MXI2D* family cells.
+
+         Warning :   **WARN: (SOCLF-200):    Pin 'A' in macro 'MXI2D' has no
+                     ANTENNAGATEAREA attribute defined.
+                     For any non-power/ground input or inout pin, The attribute should be
+                     defined if any area ratio antenna attribute is defined on any layer.
+
+        The MXI2D* family of cells do not have the ANTENNAGATEAREA defined for pin A
+        and B. For these cells, these pins are not gate inputs; they are diffusion
+        inputs. Therefore, no gate area exists and ANTENNAGATEAREA cannot be defined.
+        However ANTENNADIFFAREA is defined for these pins.
+
+******************************************************************************************
+
+ARM, Inc.
+
+SMIC 180LL(180nm with LDMOS) RVT Process SC7 Ultra High Density Standard Cell Library
+Release Notes
+===============================================================================
+r0p0-00eac0 (23/11/10)
+
+*** This is the first relase for this library ***
+	
+Process Technology Data
+-----------------------
+This section lists all of the foundry documents and technology files used
+to design this product.
+
+    o Process Name
+        - SMIC 180LL(180nm with LDMOS) PROCESS
+
+    o Design Rule Document
+        - TD-LD18-DR-2001v2T, Rev 2T,  March 01,2010
+    
+    o GDS Layer Usage Description File
+        - SmicVTMP_LO_SRAM_MR_MM_HV_LC_018, Rev 2.7, September 08,2009 
+
+    o DRC Command File
+        - Calibre DRC Command File
+          SmicDR2T_calDRC018_LDMOS_sali_p1mtx_186016_specialCTM,Rev 1.2.b,June 10,2010
+        
+    o LVS Command File
+        - Calibre LVS Command File
+		SmicSP1T_cal018_LDMOS_sali_plmtx_1860160, Rev 1.1, March 01,2010
+	- Hercules LVS Command File(For Extraction)
+		SmicSP1T_starRCXT018_LDMOS_sali_plmtx_1860160, Rev 0.3, March 01,2010
+
+    o HSpice model File
+	- hv018_v0p2.lib, Rev 0.2, October 26,2009 
+	  
+         	
+    o Extractor Technology File
+         SmicSP1T_starRCXT018_LDMOS_sali_plmtx_1860160	Rev 0.3, September 30,2010
+
+EDA Views
+---------
+This section lists the EDA tools and versions supported for this product release.
+The items indicated by the "*" were used during the QA testing of this release.
+The items indicated by the "**" are exception to ARM EDA package 6.2 and used in QA testing.
+The items indicated by the "o" are not used during the QA testing but supported. 
+
+    * Cadence NC-Sim (Verilog)
+        - 6.2
+    * Synopsys VCS (Verilog)
+        - 2006.06
+    * Mentor ModelSim (Verilog)
+        - 6.3
+    * Synopsys Design Compiler
+        - 2007.12
+    o Synopsys Module Compiler 
+        - 2007.12
+    * Cadence RTL Compiler (.lib)
+        - 8.1
+    * Synopsys PrimeTime (.lib/.db)
+        - 2007.12
+    o Synopsys Power Compiler
+        - 2007.12
+    o Synopsys PrimePower/PrimeTime PX
+        - 2007.12
+    o Synopsys JupiterXT (Design Planning)
+        - 2007.12o No impact to other Physical views (LEF,Milkyway) with this release.
+    o Cadence SoC Encounter/First Encounter (Design Planning)
+        - 7.1
+    * Cadence SoC Encounter/NanoRoute (Place & Route)
+        - 7.1
+    * Synopsys ICC
+        - 2007.12
+    o Synopsys DFT Compiler
+        - 2007.12
+    * Cadence Composer (schematic entry)
+        - 5.1.41
+    * Adobe Acrobat Reader (PDF Documentation)
+        - 5.0
+    * Synopsys HSPICE 
+        - 2009.09
+    * Synopsys Library Compiler 
+        - 2007.12-SP5
+    * Synopsys Hercules (For Extraction)
+       	- 2006.12-sp2-7o No impact to other Physical views (LEF,Milkyway) with this release.
+    * Synopsys Starrcxt
+    	- 2007.12-SP1
+    * Mentor Graphics Calibre (GDSII, CDL)
+        - 2007.2_34.24
+   ** Synopsys TetraMax
+        - 2009.06
+    * Synopsys Milkyway 
+        - 2007.12
+    * Synopsys Formality
+        - 2009.06	
+    * Cadence Conformal
+        - 8.10.400
+    * Cadence ETS 
+        - 8.1
+    * Magma Talus
+        - 1.0.80
+
+Technology Implementation
+-------------------------
+This section provides information on items that may not be included in the
+foundry documentation.
+
+Timing and power views characterized at the following conditions:
+ 
+ 1.8 Volt Domain:
+
+    sc7_logic018ll_base_rvt_ss_typ_max_1p62v_125c - Slow N18_DNW, Slow P18_DNW,
+         typical extraction, Maximum overlay, 1.62V supply,
+         125C temperature
+
+    sc7_logic018ll_base_rvt_tt_typ_max_1p80v_25c  - Typical N18_DNW, Typical P18_DNW,
+         typical extraction, Maximum overlay, 1.80V supply,
+         25C temperature
+
+    sc7_logic018ll_base_rvt_ff_typ_min_1p98v_m40c - Fast N18_DNW, Fast P18_DNW, 
+         typical extraction, Minimum overlay, 1.98V supply,
+         -40C temperature
+
+    
+    Mandatory Tapeout layers required for foundry:
+
+         - GDS2 text layer 63:63 is allocated by foundry for IP marking.
+	 - GDS2 text layer 30:0 is allocated by foundry for IP marking.
+	 - GDS2 text layer 10:0 is allocated by foundry for IP marking.
+	  *** These are mandatory tapeout layers ****
+   
+ 
+Methodology
+-----------
+This section describes design issues that may be applicable to
+this release.
+
+
+   o Calibre DRC optionso No impact to other Physical views (LEF,Milkyway) with this release.
+
+    	BEOL_STACK ML5
+	POLY_RESISTOR_RULE yes
+	setenv SLOT_RULE yes
+	setenv DENSITY_CHECK TRUE
+
+    o Calibre LVS options
+        BEOL_STACK ML5
+	RES_MODEL R
+	SPLIT_GATE yes
+	INSTANCE 1
+	VIRTUAL_CONNECT no
+	BASIC_ERC no
+	ALL_ERC yes
+
+   o  Hercules LVS options (for extraction)
+   	HERCTOPLM 5
+	ERCCHECK TRUE
+	RES_MODEL R
+	STARRCXT TRUE
+	VIRTUAL_CONNECT no
+	OUTPUT_GRAPHICS FALSE
+	CASE_SENSITIVE yes
+	COMPARE_PROPERTIES TRUE
+	INSTANCE 0
+	VIRTUAL_CONNECT_NAMES VNW, VPW, VDD, VSS
+
+
+   o StarRCXT options :
+
+	REMOVE_FLOATING_NETS: YES
+	MILKYWAY_EXTRACT_VIEW: YES
+	TRANSLATE_RETAIN_BULK_LAYERS: YES
+	CASE_SENSITIVE: NO
+	EXTRACTION: RC
+	COUPLE_TO_GROUND: NO
+	COUPLING_MULTIPLIER: 1
+	IGNORE_CAPACITANCE: ALL
+	COUPLING_ABS_THRESHOLD: 1.0e-18
+	COUPLING_REL_THRESHOLD: 0.03
+	MODE: 400
+	SKIP_CELLS: !*
+	NETS: * !VNW !VPW
+	POWER_NETS: VDD VSS DVDD DVSS RVDD RVSS VDDE VSSE VSSC VSSP VDDPE VDDCE VDDC VDDP
+	POWER_EXTRACT: YES
+	XREF: YES
+	NET_TYPE: SCHEMATIC
+	CELL_TYPE: SCHEMATIC
+	NETLIST_FORMAT: NETNAME
+	REMOVE_DANGLING_NETS: YES
+	REDUCTION: YES
+	NETLIST_INSTANCE_SECTION: YES
+	NETLIST_GROUND_NODE_NAME: VSS
+	NETLIST_PASSIVE_PARAMS: YES
+	EXTRACT_VIA_CAPS: YES
+	NETLIST_NODENAME_NETNAME:           YES
+	TCAD_GRD_FILE: SmicSP1T_018_LDMOS_p1mt5_tran_typ.nxtgrd
+	MAPPING_FILE: SmicSP1T_her018_LDMOS_sali_plmt5_tran_1860160.map
+
+  
+  
+   o DRC of Individual cells (Calibre):
+
+   	o Following cell will fail for RULECHECK: AA_8
+	  FILL1_A7TR
+	  
+	   FILL1 is a one track wide cell.This DRC violation
+	   is on Individual cell.This rule violation would go away 
+	   in Block level.
+
+	o Few cells would fail for folliwing DRC rules.
+	  These are DRC violations on Individual cell. But these
+	  violations would go away in Block level when cells are
+	  abutted together.
+
+	  PD_GT (Min. Poly GDS pattern density)
+          PD_M1 (Min. Metal 1 GDS pattern density)
+
+   o LVS of Individual cells (Calibre):
+
+       ANTENNA_A7TR will fail cell level lvs
+       clean at chip level (when abutted with the FILLTIE).
+
+
+     DRC of Place and Route test cases:
+     -------------------------------------
+    
+       o Orientation & Placement of Triple well Specific cells
+   
+         All the cells in this library has DeepNwell Layer (DNW)
+         Following Placement is needed to avoid DRC errors needed to have
+o No impact to other Physical views (LEF,Milkyway) with this release.         DNW shape and Nwell shape in the block level.
+      
+     	 - ENDCAPTIE11_A7TR cell to be placed in both left and right edges of the Block 
+           (with topmost row and left side without any flipping.)
+         - Top-most row to be placed with no vertical Flipping.
+       	   ie., VDD rail to face the North Orientation.
+     	 - Bottom-most row to be placed with vertical Flipping.
+           ie., VDD rail to face the South Orientation.   
+
+
+ 
+Known Problems and Solutions
+----------------------------
+This section describes known problems and work-arounds as of the release
+date of this library.
+
+    o All the cell will flag for following DRC
+      (SMIC has agreed to relax these rules in the upcoming DRC deck)
+     		DNW_9 : Minimum space from a NW edge to a N+AA outside surrounding NW when DNW is implemented is 0.5
+		
+    o Few cells would fail for following rules 
+      (SMIC has agreed to update these rules in the upcoming DRC deck)
+    		PW_1 : Minimum width of an PW region is 0.86um.
+
+    o Few cells would fail for following rules (Metal SLOT rules)
+      (SMIC has agreed to update these rules in the upcoming DRC deck)
+		 
+		SLOT_1_a  : Minimum slot dimension for each metal layers is 2.0
+		SLOT_2_a  : Minimum slot enclosure by metal is 5.0
+		SLOT_3a_a : Minimum space between slots is 2.0
+
+
+    o The following warning message will be reported when the Liberty files are read into RTL Compiler: 
+        - Warning : Improperly defined 'leakage_power' group. [LBR-150]:   
+                     The 'related_pg_pin' attribute value 'VDD*' in 'leakage_power' group
+        - Cadence has fixed this issue in 9.1.100 release
+          Cadence has confirmed that this warning will not have any impact on the calculation
+	  of leakage power and no impact on reporting power.For leakage power calculations and
+	  effect on RC by this Warning, please see if the pg_pin group is defined later than its 
+	  usage, then warning can be ignored.
+	
+    o Encounter could flag the following Warning for the MXI2D* family cells.
+
+         Warning :   **WARN: (SOCLF-200):    Pin 'A' in macro 'MXI2D' has no
+                     ANTENNAGATEAREA attribute defined.
+                     For any non-power/ground input or inout pin, The attribute should be
+                     defined if any area ratio antenna attribute is defined on any layer.
+
+        The MXI2D* family of cells do not have the ANTENNAGATEAREA defined for pin A
+        and B. For these cells, these pins are not gate inputs; they are diffusion
+        inputs. Therefore, no gate area exists and ANTENNAGATEAREA cannot be defined.
+        However ANTENNADIFFAREA is defined for these pins.
+
+
+
+

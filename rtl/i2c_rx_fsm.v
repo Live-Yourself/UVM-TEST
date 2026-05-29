@@ -7,9 +7,9 @@ module i2c_rx_fsm (
     input  wire       rst_n,
     input  wire       start_cond,
     input  wire       stop_cond,
-    input  wire       scl_sync,
     input  wire       scl_rise,
     input  wire       scl_fall,
+    input  wire       scl_sync,
     input  wire       sda_sync,
     input  wire [7:0] rx_byte,
     input  wire [7:0] reg_rdata,
@@ -71,9 +71,12 @@ module i2c_rx_fsm (
             reg_we <= 1'b0;
 
             if (stop_cond) begin
-                ack_drive_r <= 1'b0;
+		ack_drive_r <= 1'b0;
+                state <= ST_IDLE;
             end else if (start_cond) begin
-                ack_drive_r <= 1'b0;
+		ack_drive_r <= 1'b0;
+                state   <= ST_ADDR;
+                bit_cnt <= 3'd0;
             end else if (scl_fall) begin
                 case (state)
                     ST_ADDR_ACK:  ack_drive_r <= addr_match;
@@ -81,13 +84,6 @@ module i2c_rx_fsm (
                     ST_WRITE_ACK: ack_drive_r <= 1'b1;
                     default:      ack_drive_r <= 1'b0;
                 endcase
-            end
-
-            if (stop_cond) begin
-                state <= ST_IDLE;
-            end else if (start_cond) begin
-                state   <= ST_ADDR;
-                bit_cnt <= 3'd0;
             end else begin
                 case (state)
                     ST_IDLE: begin
@@ -169,7 +165,7 @@ module i2c_rx_fsm (
                         if (scl_rise) begin
                             bit_cnt <= bit_cnt + 3'd1;
                             if (bit_cnt == 3'd7) begin
-                                reg_addr <= reg_addr + 8'd1;
+                                reg_addr     <= reg_addr + 8'd1;
                                 state <= ST_READ_ACK;
                             end
                         end

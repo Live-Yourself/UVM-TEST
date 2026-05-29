@@ -2,6 +2,9 @@
 # Post-processing for run_uvm.sh
 # This script is intended to be sourced by run_uvm.sh after coverage DB merge step.
 
+# Temporarily disable strict mode to handle unbound variables from parent script
+set +u
+
 : "${RESULT_BASE:?}"
 : "${TEST_NAME:?}"
 : "${SEED:?}"
@@ -32,6 +35,10 @@
 
 LOG_ARCHIVE="${LOG_FILE}"
 
+# Global bucket aggregation (cumulative coverage tracking) - initialize early
+GLOBAL_BUCKET_HIT_V1="${RESULT_BASE}/global_buckets_v1.txt"  # Set of hit bucket names for V1
+GLOBAL_BUCKET_HIT_V2="${RESULT_BASE}/global_buckets_v2.txt"  # Set of hit bucket names for V2
+
 if [[ -f "${LOG_FILE}" ]]; then
   UVM_ERR_CNT=$(grep -cE '^UVM_ERROR .*\[[^]]+\]' "${LOG_FILE}" || true)
   UVM_FATAL_CNT=$(grep -cE '^UVM_FATAL .*\[[^]]+\]' "${LOG_FILE}" || true)
@@ -52,6 +59,25 @@ if [[ -n "${FSDB_FILE_PATH}" ]] && [[ -f "${FSDB_FILE_PATH}" ]]; then
   FSDB_PRODUCED=1
 fi
 
+# Calculate GLOBAL cumulative coverage (for dashboard/global tracking)
+# Total buckets: 7 (V1: addr_low, addr_mid, addr_high, len_single, len_short, len_burst, illegal_read)
+#              + 7 (V2: legal_wr, legal_rd, illegal_wr, illegal_rd, ack_all, ack_nack, rd_match) = 14 total
+TOTAL_BUCKETS=14
+GLOBAL_HIT_BUCKETS=0
+if [[ -f "${GLOBAL_BUCKET_HIT_V1}" ]] && [[ -f "${GLOBAL_BUCKET_HIT_V2}" ]]; then
+  # Count non-empty lines (bucket names are always at least 1 char: [a-z_]+)
+  V1_HIT=$(grep -c "^[a-z_]\+$" "${GLOBAL_BUCKET_HIT_V1}" 2>/dev/null || echo 0)
+  V2_HIT=$(grep -c "^[a-z_]\+$" "${GLOBAL_BUCKET_HIT_V2}" 2>/dev/null || echo 0)
+  GLOBAL_HIT_BUCKETS=$((V1_HIT + V2_HIT))
+fi
+
+# Compute cumulative functional coverage percentage (global)
+GLOBAL_FUNC_COV="N/A"
+if [[ ${TOTAL_BUCKETS} -gt 0 ]]; then
+  GLOBAL_FUNC_COV=$(awk -v hit=${GLOBAL_HIT_BUCKETS} -v total=${TOTAL_BUCKETS} 'BEGIN{printf "%.2f", (hit*100.0)/total}')
+fi
+
+# Per-run functional coverage snapshot from current test log (used in RUN_DB)
 FUNC_COV="N/A"
 FCOV_VAL=""
 if [[ -f "${LOG_FILE}" ]]; then
@@ -89,13 +115,23 @@ extract_kv_num() {
   local line="$1"
   local key="$2"
   local val
-  val=$(echo "${line}" | sed -nE "s/.*${key}=([0-9]+).*/\\1/p")
+  # Use key boundary matching to avoid substring collision, e.g.
+  # key=legal_wr accidentally matching illegal_wr.
+  val=$(echo "${line}" | sed -nE "s/.*(^|[[:space:],])${key}=([0-9]+)([[:space:],]|$).*/\\2/p")
   if [[ -z "${val}" ]]; then
     echo 0
   else
     echo "${val}"
   fi
 }
+
+# Initialize global bucket tracking files (truly empty, no blank line)
+if [[ ! -f "${GLOBAL_BUCKET_HIT_V1}" ]]; then
+  true > "${GLOBAL_BUCKET_HIT_V1}"  # Create truly empty file
+fi
+if [[ ! -f "${GLOBAL_BUCKET_HIT_V2}" ]]; then
+  true > "${GLOBAL_BUCKET_HIT_V2}"  # Create truly empty file
+fi
 
 # Parse bucket-hit line from scoreboard and persist as coverage report CSV
 BUCKET_DB="${RESULT_BASE}/coverage_buckets.csv"
@@ -126,6 +162,29 @@ if [[ -n "${bucket_line}" ]]; then
 fi
 
 echo "$(date '+%F %T'),${TEST_NAME},${SEED},${addr_low:-0},${addr_mid:-0},${addr_high:-0},${len_single:-0},${len_short:-0},${len_burst:-0},${illegal_read:-0}" >> "${BUCKET_DB}"
+
+# Track new hit buckets globally (V1) - for cumulative coverage
+if [[ ${addr_low} -gt 0 ]] && ! grep -q "^addr_low$" "${GLOBAL_BUCKET_HIT_V1}"; then
+  echo "addr_low" >> "${GLOBAL_BUCKET_HIT_V1}"
+fi
+if [[ ${addr_mid} -gt 0 ]] && ! grep -q "^addr_mid$" "${GLOBAL_BUCKET_HIT_V1}"; then
+  echo "addr_mid" >> "${GLOBAL_BUCKET_HIT_V1}"
+fi
+if [[ ${addr_high} -gt 0 ]] && ! grep -q "^addr_high$" "${GLOBAL_BUCKET_HIT_V1}"; then
+  echo "addr_high" >> "${GLOBAL_BUCKET_HIT_V1}"
+fi
+if [[ ${len_single} -gt 0 ]] && ! grep -q "^len_single$" "${GLOBAL_BUCKET_HIT_V1}"; then
+  echo "len_single" >> "${GLOBAL_BUCKET_HIT_V1}"
+fi
+if [[ ${len_short} -gt 0 ]] && ! grep -q "^len_short$" "${GLOBAL_BUCKET_HIT_V1}"; then
+  echo "len_short" >> "${GLOBAL_BUCKET_HIT_V1}"
+fi
+if [[ ${len_burst} -gt 0 ]] && ! grep -q "^len_burst$" "${GLOBAL_BUCKET_HIT_V1}"; then
+  echo "len_burst" >> "${GLOBAL_BUCKET_HIT_V1}"
+fi
+if [[ ${illegal_read} -gt 0 ]] && ! grep -q "^illegal_read$" "${GLOBAL_BUCKET_HIT_V1}"; then
+  echo "illegal_read" >> "${GLOBAL_BUCKET_HIT_V1}"
+fi
 
 BUCKET2_DB="${RESULT_BASE}/coverage_buckets_v2.csv"
 if [[ ! -f "${BUCKET2_DB}" ]]; then
@@ -167,6 +226,29 @@ if [[ "${bucket2_seen}" -eq 0 ]] && [[ "${STRICT_BUCKET2}" == "1" ]] && [[ "${FU
 fi
 
 echo "$(date '+%F %T'),${TEST_NAME},${SEED},${legal_wr:-0},${legal_rd:-0},${illegal_wr:-0},${illegal_rd:-0},${ack_all:-0},${ack_nack:-0},${rd_match:-0}" >> "${BUCKET2_DB}"
+
+# Track new hit buckets globally (V2) - for cumulative coverage
+if [[ ${legal_wr} -gt 0 ]] && ! grep -q "^legal_wr$" "${GLOBAL_BUCKET_HIT_V2}"; then
+  echo "legal_wr" >> "${GLOBAL_BUCKET_HIT_V2}"
+fi
+if [[ ${legal_rd} -gt 0 ]] && ! grep -q "^legal_rd$" "${GLOBAL_BUCKET_HIT_V2}"; then
+  echo "legal_rd" >> "${GLOBAL_BUCKET_HIT_V2}"
+fi
+if [[ ${illegal_wr} -gt 0 ]] && ! grep -q "^illegal_wr$" "${GLOBAL_BUCKET_HIT_V2}"; then
+  echo "illegal_wr" >> "${GLOBAL_BUCKET_HIT_V2}"
+fi
+if [[ ${illegal_rd} -gt 0 ]] && ! grep -q "^illegal_rd$" "${GLOBAL_BUCKET_HIT_V2}"; then
+  echo "illegal_rd" >> "${GLOBAL_BUCKET_HIT_V2}"
+fi
+if [[ ${ack_all} -gt 0 ]] && ! grep -q "^ack_all$" "${GLOBAL_BUCKET_HIT_V2}"; then
+  echo "ack_all" >> "${GLOBAL_BUCKET_HIT_V2}"
+fi
+if [[ ${ack_nack} -gt 0 ]] && ! grep -q "^ack_nack$" "${GLOBAL_BUCKET_HIT_V2}"; then
+  echo "ack_nack" >> "${GLOBAL_BUCKET_HIT_V2}"
+fi
+if [[ ${rd_match} -gt 0 ]] && ! grep -q "^rd_match$" "${GLOBAL_BUCKET_HIT_V2}"; then
+  echo "rd_match" >> "${GLOBAL_BUCKET_HIT_V2}"
+fi
 
 RUN_DB="${RESULT_BASE}/regression_runs.csv"
 if [[ ! -f "${RUN_DB}" ]]; then
@@ -211,6 +293,21 @@ if [[ "${TOTAL_RUNS}" -gt 0 ]]; then
   PASS_RATE=$(awk -v p="${PASS_RUNS}" -v t="${TOTAL_RUNS}" 'BEGIN{printf "%.2f", (p*100.0)/t}')
 else
   PASS_RATE="0.00"
+fi
+
+# Recompute global cumulative coverage after this run's bucket update,
+# so dashboard always shows latest global value.
+GLOBAL_HIT_BUCKETS_DASH=0
+GLOBAL_V1_HIT_DASH=0
+GLOBAL_V2_HIT_DASH=0
+if [[ -f "${GLOBAL_BUCKET_HIT_V1}" ]] && [[ -f "${GLOBAL_BUCKET_HIT_V2}" ]]; then
+  GLOBAL_V1_HIT_DASH=$(grep -c "^[a-z_]\+$" "${GLOBAL_BUCKET_HIT_V1}" 2>/dev/null || echo 0)
+  GLOBAL_V2_HIT_DASH=$(grep -c "^[a-z_]\+$" "${GLOBAL_BUCKET_HIT_V2}" 2>/dev/null || echo 0)
+  GLOBAL_HIT_BUCKETS_DASH=$((GLOBAL_V1_HIT_DASH + GLOBAL_V2_HIT_DASH))
+fi
+GLOBAL_FUNC_COV_DASH="N/A"
+if [[ ${TOTAL_BUCKETS} -gt 0 ]]; then
+  GLOBAL_FUNC_COV_DASH=$(awk -v hit=${GLOBAL_HIT_BUCKETS_DASH} -v total=${TOTAL_BUCKETS} 'BEGIN{printf "%.2f", (hit*100.0)/total}')
 fi
 
 CODE_COV_HINT="${MERGE_REPORT_DIR}"
@@ -333,6 +430,7 @@ CODE_COV_HINT="${MERGE_REPORT_DIR}"
         printf "| %s | %d | %.2f | %s |\n", t, cnt[t]+0, avg, latest[t];
       }
     }' "${RUN_DB}" | sort
+  echo "| __GLOBAL_CUMULATIVE__ | - | - | ${GLOBAL_FUNC_COV_DASH} |"
 } > "${DASHBOARD_FILE}"
 
 echo "[DONE] UVM test=${TEST_NAME}"
@@ -353,3 +451,6 @@ if [[ -n "${FSDB_FILE_FINAL}" ]]; then
 else
   echo "       fsdb: ${WAVE_DIR}/<pass|fail>/${COV_RUN_NAME}.fsdb (if enabled)"
 fi
+
+# Restore strict mode if parent script had it
+set -u

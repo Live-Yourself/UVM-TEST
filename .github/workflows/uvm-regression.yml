@@ -1,0 +1,51 @@
+name: uvm-regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      list:
+        description: "testlist file under sim/work/testlists"
+        required: false
+        default: "smoke.list"
+      jobs:
+        description: "parallel jobs"
+        required: false
+        default: "2"
+      repeat:
+        description: "repeat each item"
+        required: false
+        default: "1"
+  schedule:
+    # 02:00 UTC every day
+    - cron: '0 2 * * *'
+  push:
+    branches: [ main ]
+    paths:
+      - 'rtl/**'
+      - 'sim/**'
+      - '.github/workflows/uvm-regression.yml'
+
+jobs:
+  regression:
+    # VCS/URG usually requires private licensed self-hosted runner
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run regression
+        shell: bash
+        run: |
+          cd sim/work
+          LIST_FILE="${{ github.event.inputs.list || 'nightly.list' }}"
+          JOBS="${{ github.event.inputs.jobs || '2' }}"
+          REPEAT="${{ github.event.inputs.repeat || '1' }}"
+          bash run_regression.sh -l "testlists/${LIST_FILE}" -j "${JOBS}" -r "${REPEAT}" --nightly
+
+      - name: Upload regression artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-result
+          path: sim/sim_result

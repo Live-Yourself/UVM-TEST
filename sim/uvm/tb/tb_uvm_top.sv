@@ -1,4 +1,4 @@
-﻿`timescale 1ns/1ps
+`timescale 1ns/1ps
 
 module tb_uvm_top;
   import uvm_pkg::*;
@@ -15,7 +15,7 @@ module tb_uvm_top;
     .rst_n    (i2c_vif.rst_n),
     .scl      (i2c_vif.scl),
     .sda_in   (i2c_vif.sda_in),
-    .sda_oe   (i2c_vif.sda_oe_dut)
+    .sda_oe (i2c_vif.sda_oe_dut)
   );
 
   initial begin

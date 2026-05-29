@@ -1,0 +1,27 @@
+************************************************************************
+* auCdl Netlist:
+* 
+* Library Name:  PMT064_TPlay
+* Top Cell Name: BUFX4_ESD_7T
+* View Name:     schematic
+* Netlisted on:  Oct 23 16:10:23 2019
+************************************************************************
+
+*.EQUATION
+*.SCALE METER
+*.MEGA
+.PARAM
+
+
+
+************************************************************************
+* Library Name: PMT064_TPlay
+* Cell Name:    BUFX4_ESD_7T
+* View Name:    schematic
+************************************************************************
+
+.SUBCKT CDM_7T A VDD VSS Y
+*.PININFO A:I Y:O VDD:B VSS:B
+MNM1 net06 VSS VSS VSS n18 W=1.16u L=200n m=1
+RR1 A net06 206.189 $[rnposab] $W=2.3u $L=1u M=1
+.ENDS

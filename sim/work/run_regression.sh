@@ -101,7 +101,7 @@ elif [[ "${NIGHTLY}" -eq 1 ]]; then
   REG_FSDB_ENABLE=0
 elif [[ "${JOBS}" -gt 1 ]]; then
   REG_FSDB_ENABLE=0
-elif [[ "${JOBS}" -eq 1 ]]; then
+elif [[ "${LIST_BASENAME}" == "all_regression.list" ]]; then
   REG_FSDB_ENABLE=1
 else
   REG_FSDB_ENABLE=0
@@ -123,6 +123,7 @@ echo "[REG] Repeat: ${REPEAT}"
 echo "[REG] FSDB  : ${REG_FSDB_ENABLE} (policy: serial batch on, parallel/nightly off, debug-rerun on)"
 echo "[REG] Auto debug rerun on FAIL: ${AUTO_DEBUG_RERUN}"
 echo "[REG] MON sample mode: ${MON_SAMPLE_ENABLE}, sample_cases=${MON_SAMPLE_CASES}"
+
 if [[ "${NIGHTLY}" -eq 1 ]]; then
   echo "[REG] Mode  : NIGHTLY"
 fi
@@ -132,7 +133,7 @@ mkdir -p "${TMP_DIR}"
 SUMMARY_CSV="${TMP_DIR}/regression_batch_$(date +%Y%m%d_%H%M%S).csv"
 echo "case_id,test,seed,extra,status,case_log,start_ts,end_ts,mon_sampled" > "${SUMMARY_CSV}"
 
-FAIL_ROOT="${SCRIPT_DIR}/../sim_result/fail_logs"
+FAIL_ROOT="${SCRIPT_DIR}/../sim_result/fail_regression_logs"
 if [[ "${NIGHTLY}" -eq 1 ]]; then
   FAIL_MODE_DIR="${FAIL_ROOT}/nightly"
 elif [[ "${JOBS}" -gt 1 ]]; then
@@ -144,6 +145,7 @@ mkdir -p "${FAIL_MODE_DIR}"
 
 case_id=0
 mon_sample_used=0
+
 pids=()
 declare -A pid_case
 
@@ -160,7 +162,7 @@ await_slot() {
 run_one() {
   local cid="$1" test_name="$2" seed_val="$3" extra_args="$4" mon_sampled="$5"
   local status="PASS"
-  local case_log="${TMP_DIR}/case_${cid}_${test_name}.log"
+  local case_log="${TMP_DIR}/case_${cid}_$(date +%Y%m%d_%H%M%S)_${test_name}.log"
   local start_ts end_ts
   local cmd=(bash "${RUN_UVM}" "${test_name}")
 
@@ -324,3 +326,4 @@ echo "[REG] Global dashboard: ${SCRIPT_DIR}/../sim_result/regression_dashboard.m
 if [[ "${FAIL}" -gt 0 ]]; then
   exit 1
 fi
+

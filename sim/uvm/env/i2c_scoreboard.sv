@@ -21,7 +21,7 @@ class i2c_scoreboard extends uvm_component;
     super.new(name, parent);
     imp_drv = new("imp_drv", this);
     imp_mon = new("imp_mon", this);
-    cov = i2c_cov::type_id::create("cov");
+    cov = i2c_cov::type_id::create("cov", this);
   endfunction
 
   function void build_phase(uvm_phase phase);
