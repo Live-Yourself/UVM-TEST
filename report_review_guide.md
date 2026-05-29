@@ -5,6 +5,8 @@ DC 综合报告查看指南（i2c_slave_top）
 - 明确每类报告应关注的关键字段
 
 1) summary/check_design_*.rpt
+- 含义：设计结构与连接合法性检查报告（lint/结构一致性）。
+- 作用：第一时间暴露连线、端口、模块实例等基础结构问题。
 - 关注点：是否有 ERROR/WARNING
 - 常见问题：未连接端口、未定义模块、锁存器推断
 - 判定：出现 ERROR 必须修复；WARNING 视影响程度决定
@@ -20,6 +22,8 @@ DC 综合报告查看指南（i2c_slave_top）
 - LINT-33：u_regfile 的 waddr 与 raddr 绑定到同一 net（reg_addr[*]），这是设计选择（读写同一地址），一般可接受。
 
 2) summary/check_timing_*.rpt
+- 含义：时序前置检查报告（约束完整性与时序环境一致性）。
+- 作用：确认是否存在未约束路径、缺失输入延时、环路等基础时序风险。
 - 关注点：是否有 “violations” 或 “unconstrained paths”
 - 判定：存在未约束路径需要补约束；有负 slack 需优化
 
@@ -37,6 +41,8 @@ DC 综合报告查看指南（i2c_slave_top）
 - 建议后续用 constraint 报告确认是否存在真正的约束违例。
 
 3) summary/qor_*.rpt
+- 含义：综合质量总览报告（QoR: timing/area/power/drc）。
+- 作用：用于一页判断当前综合结果是否达标及优化方向。
 - 关注点：WNS、TNS、NUM paths、面积、功耗
 - 判定：WNS<0 或 TNS<0 代表时序违例
 
@@ -45,6 +51,7 @@ DC 综合报告查看指南（i2c_slave_top）
 - Critical Path Length：关键路径延时总和。
 - Critical Path Slack：关键路径裕量（负值=违例）。
 - Critical Path Clk Period：参考时钟周期。
+- Worst Negative Slack（WNS）：最差负时序裕量（最差路径的slack）。
 - Total Negative Slack (TNS)：所有负 slack 之和。
 - No. of Violating Paths：违例路径数量。
 - Worst/Total Hold Violation：保持时间最坏/总违例（负值=违例）。
@@ -58,6 +65,8 @@ DC 综合报告查看指南（i2c_slave_top）
 - Design Rules：Max Trans/Fanout Violations 非 0，说明约束或优化不足，需检查 max_transition/max_fanout 设置与修复策略。
 
 4) summary/constraint_*.rpt
+- 含义：约束违例摘要报告（max_delay/fanout/cap 等）。
+- 作用：快速判断“约束是否被满足”，并锁定违例类别。
 - 关注点：max_delay / max_fanout / max_capacitance / multiport_net
 - 判定：列出违例即需处理（修约束或优化结构）
 
@@ -72,6 +81,8 @@ DC 综合报告查看指南（i2c_slave_top）
 - rst_n 有轻微 fanout 违例，常见于全局复位，可通过约束豁免或专用复位缓冲解决。
 
 5) summary/timing_violate_*.rpt
+- 含义：负 slack 违例路径摘要报告。
+- 作用：集中查看需优先修复的时序失败路径。
 - 关注点：slack < 0 的路径细节
 - 判定：每条路径都需确认是否可接受或必须优化
 
@@ -85,10 +96,14 @@ DC 综合报告查看指南（i2c_slave_top）
 - 结论：setup 时序无违例；若仍有 hold 违例需转看 hold 报告或 analysis/timing_max。
 
 6) analysis/timing_max_*.rpt
+- 含义：最大延时（setup）路径详细时序报告。
+- 作用：定位关键慢路径，指导逻辑重构、约束与实现优化。
 - 关注点：最长路径排名与结构
 - 判定：用于定位瓶颈路径，指导优化
 
 analysis/timing_min_*.rpt（hold）补充：
+- 含义：最小延时（hold）路径详细时序报告。
+- 作用：定位过快路径，指导 hold 修复（插延时/缓冲/约束调整）。
 - 用途：查看最短路径与 hold 违例。
 - 关注点：Path Type=min 的 slack、Start/End、data arrival/required。
 
@@ -103,14 +118,20 @@ analysis/timing_min_*.rpt（hold）补充：
 - 这是典型“过快路径”，需要插入延时或让工具做 hold 修复。
 
 7) analysis/area_*.rpt
+- 含义：面积分析报告（总面积与层级面积分布）。
+- 作用：识别面积热点模块，支撑面积优化与资源权衡。
 - 关注点：层级面积分布、是否异常膨胀
 - 判定：某模块面积异常需核查 RTL 或约束
 
 8) analysis/power_*.rpt
+- 含义：功耗分析报告（动态/静态及分项）。
+- 作用：识别功耗热点并评估优化收益。
 - 关注点：总功耗、动态/静态占比
 - 判定：无切换活动时仅参考趋势
 
 9) analysis/constraint_*.rpt
+- 含义：约束检查详细报告（对象级明细）。
+- 作用：精确定位每条违例网线/端点，作为修复依据。
 - 关注点：比 summary 更详细
 - 判定：用于精确定位违例对象
 
@@ -120,10 +141,14 @@ analysis/timing_min_*.rpt（hold）补充：
 - rst_n 也有轻微 fanout 违例，可考虑复位缓冲或在约束中豁免。
 
 10) analysis/zero_interconnect_*（零互连）
+- 含义：理想互连（忽略布线寄生）条件下的时序分析报告。
+- 作用：区分“逻辑本身问题”与“互连负载导致问题”。
 - 关注点：理想连线下时序
 - 判定：若零互连仍违例，多半是逻辑结构问题
 
 11) debug/high_fanout_nets_*.rpt
+- 含义：高扇出网络调试报告。
+- 作用：定位高负载网络，指导缓冲插入与网络重构。
 - 关注点：扇出过高的 nets
 - 判定：可能导致时序问题，需插 buffer/重构
 
@@ -139,37 +164,55 @@ analysis/timing_min_*.rpt（hold）补充：
 - u_regfile/n_logic0_ fanout=256，说明常量网或译码网扇出过高，建议插缓冲或优化译码结构。
 
 12) debug/clock_gating_*.rpt
+- 含义：时钟门控结构与覆盖率报告。
+- 作用：检查门控是否生效、是否满足低功耗与时序安全要求。
 - 关注点：门控时钟覆盖率
 - 判定：若使用门控，需确认门控策略与安全性
 
 13) debug/latches_*.rpt
+- 含义：锁存器推断报告。
+- 作用：发现非预期 latch，避免功能/时序风险。
 - 关注点：是否有 latch
 - 判定：本工程不应有 latch，若出现需修 RTL
 
 14) debug/clock_tree_*.rpt
+- 含义：时钟网络结构概览报告（综合阶段视图）。
+- 作用：辅助理解时钟分发形态与潜在时钟风险点。
 - 关注点：时钟结构概览
 - 判定：DC 阶段仅作参考，非 CTS 结果
 
 15) debug/port_*.rpt
+- 含义：端口属性与约束状态报告。
+- 作用：核验 IO 方向、驱动、负载与时序约束是否一致。
 - 关注点：端口属性（方向/时序/驱动）
 - 判定：用于核对 IO 约束是否生效
 
 16) debug/hierarchy_*.rpt / resources_*.rpt
+- 含义：层级结构与资源使用调试报告。
+- 作用：排查模块层级异常、资源映射偏差与综合异常膨胀。
 - 关注点：模块层级与资源使用
 - 判定：定位结构异常或综合映射问题
 
 17) config/design_*.rpt
+- 含义：设计与综合环境配置摘要报告。
+- 作用：确认库、工艺角、全局设置与设计上下文正确。
 - 关注点：综合环境摘要（库/设置）
 - 判定：确认库与设置正确
 
 18) config/clocks_*.rpt
+- 含义：时钟定义与属性报告（周期/不确定度等）。
+- 作用：确认时钟约束是否正确加载并生效。
 - 关注点：时钟定义、频率、uncertainty
 - 判定：确认 clk 约束正确生效
 
 19) config/compile_options_*.rpt
+- 含义：综合编译选项记录报告。
+- 作用：用于结果复盘与可重复性追踪（确认本次使用的优化开关）。
 - 关注点：编译选项是否符合预期
 
 20) config/isolate_ports_*.rpt
+- 含义：端口隔离策略配置报告。
+- 作用：确认隔离策略是否按预期启用，避免接口级异常。
 - 关注点：端口隔离情况
 - 判定：一般应为空或符合预期
 
